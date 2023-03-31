@@ -247,13 +247,8 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 	} else if address.IsDomain() {
 		return nil, E.New("domain not resolved")
 	}
-<<<<<<< HEAD
 	if DoNotSelectInterface || d.networkStrategy == nil {
 		return d.trackConn(listener.ListenNetworkNamespace[net.Conn](d.netns, func() (net.Conn, error) {
-=======
-	if DoNotSelectInterface || d.networkStrategy == nil {
-		return trackConn(listener.ListenNetworkNamespace[net.Conn](d.netns, func() (net.Conn, error) {
->>>>>>> 721602a8 (dialer: add DoNotSelectInterface)
 			switch N.NetworkName(network) {
 			case N.NetworkUDP:
 				if !address.IsIPv6() {
@@ -322,13 +317,8 @@ func (d *DefaultDialer) DialParallelInterface(ctx context.Context, network strin
 }
 
 func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-<<<<<<< HEAD
 	if DoNotSelectInterface || d.networkStrategy == nil {
 		return d.trackPacketConn(listener.ListenNetworkNamespace[net.PacketConn](d.netns, func() (net.PacketConn, error) {
-=======
-	if DoNotSelectInterface || d.networkStrategy == nil {
-		return trackPacketConn(listener.ListenNetworkNamespace[net.PacketConn](d.netns, func() (net.PacketConn, error) {
->>>>>>> 721602a8 (dialer: add DoNotSelectInterface)
 			if destination.IsIPv6() {
 				return d.udpListener.ListenPacket(ctx, N.NetworkUDP, d.udpAddr6)
 			} else if destination.IsIPv4() && !destination.Addr.IsUnspecified() {
