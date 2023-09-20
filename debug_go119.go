@@ -1,17 +1,15 @@
+//go:build go1.19
+
 package box
 
 import (
 	"runtime/debug"
 
-<<<<<<< HEAD:debug.go
-=======
 	"github.com/sagernet/sing-box/common/conntrack"
->>>>>>> 12dd1ac8 (Improve conntrack):debug_go118.go
 	"github.com/sagernet/sing-box/option"
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
-func applyDebugOptions(options option.DebugOptions) error {
+func applyDebugOptions(options option.DebugOptions) {
 	applyDebugListenOption(options)
 	if options.GCPercent != nil {
 		debug.SetGCPercent(*options.GCPercent)
@@ -28,17 +26,11 @@ func applyDebugOptions(options option.DebugOptions) error {
 	if options.TraceBack != "" {
 		debug.SetTraceback(options.TraceBack)
 	}
-<<<<<<< HEAD:debug.go
-	if options.MemoryLimit.Value() != 0 {
-		debug.SetMemoryLimit(int64(float64(options.MemoryLimit.Value()) / 1.5))
-=======
 	if options.MemoryLimit != 0 {
-		// debug.SetMemoryLimit(int64(options.MemoryLimit))
+		debug.SetMemoryLimit(int64(options.MemoryLimit))
 		conntrack.MemoryLimit = uint64(options.MemoryLimit)
->>>>>>> 12dd1ac8 (Improve conntrack):debug_go118.go
 	}
 	if options.OOMKiller != nil {
-		return E.New("legacy oom_killer in debug options is removed, use oom-killer service instead")
+		conntrack.KillerEnabled = *options.OOMKiller
 	}
-	return nil
 }
