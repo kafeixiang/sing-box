@@ -23,15 +23,16 @@
 Port Hopping Strategies:
 
 1. Empty or `both`:
-   - Changes both client and server ports.
-   - Even if `server_ports` is a fixed range (e.g., `443:443`), the changing client port still alters the connection's 5-tuple (source IP, source port, destination IP, destination port, protocol).
-   - This can potentially bypass Quality of Service (QoS) policies.
+    - Changes both client and server ports.
+    - Even if `server_ports` is a fixed range (e.g., `443:443`), the changing client port still alters the connection's
+      5-tuple (source IP, source port, destination IP, destination port, protocol).
+    - This can potentially bypass Quality of Service (QoS) policies.
 
 2. `server`:
-   - Changes only the server port; the client port remains constant.
-   - This strategy modifies only the destination port in the 5-tuple.
-   - Originated from the `mohomo` implementation.
-   - May be sufficient to bypass certain restrictions targeting specific server ports.
+    - Changes only the server port; the client port remains constant.
+    - This strategy modifies only the destination port in the 5-tuple.
+    - Originated from the `mohomo` implementation.
+    - May be sufficient to bypass certain restrictions targeting specific server ports.
 
 ---
 
@@ -52,19 +53,43 @@ Port Hopping Strategies:
 
 ```json
 {
-   "outbounds": [
-      {
-         "type": "direct",
-         "tag": "direct",
-         
-         "tcp_keep_alive_interval": "15s",
-         "tcp_keep_alive_idle": "10min"
-      }
-   ]
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct",
+      "tcp_keep_alive_interval": "15s",
+      "tcp_keep_alive_idle": "10min"
+    }
+  ]
 }
 ```
 
 TCP Keep alive options.
+
+## Inbound TLS
+
+```json
+{
+  "inbounds": [
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "tls": {
+        "enabled": true,
+        "server_name": "sekai.love",
+        "certificate_path": "cert.pem",
+        "key_path": "key.key",
+        "reject_unknown_sni": true
+      }
+    }
+  ]
+}
+```
+
+Reject unknown sni: If the server name of connection is not equal to `server_name` and not be included in certificate,
+it will be rejected.
+
+拒绝未知 SNI：如果连接的 server name 与 `server_name` 不符 且 证书中不包含它，则拒绝连接。
 
 ## License
 
