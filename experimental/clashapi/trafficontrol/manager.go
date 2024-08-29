@@ -16,8 +16,8 @@ import (
 )
 
 type Manager struct {
-	uploadTotal   atomic.Int64
-	downloadTotal atomic.Int64
+	uploadTotal   map[string]*atomic.Int64
+	downloadTotal map[string]*atomic.Int64
 
 	connections             compatible.Map[uuid.UUID, Tracker]
 	closedConnectionsAccess sync.Mutex
@@ -26,8 +26,20 @@ type Manager struct {
 	memory uint64
 }
 
-func NewManager() *Manager {
-	return &Manager{}
+func NewManager(outbounds, endpoints []string) *Manager {
+	m := &Manager{
+		uploadTotal:   make(map[string]*atomic.Int64, len(outbounds)+len(endpoints)),
+		downloadTotal: make(map[string]*atomic.Int64, len(outbounds)+len(endpoints)),
+	}
+	for _, out := range outbounds {
+		m.uploadTotal[out] = new(atomic.Int64)
+		m.downloadTotal[out] = new(atomic.Int64)
+	}
+	for _, end := range endpoints {
+		m.uploadTotal[end] = new(atomic.Int64)
+		m.downloadTotal[end] = new(atomic.Int64)
+	}
+	return m
 }
 
 func (m *Manager) Join(c Tracker) {
@@ -48,16 +60,32 @@ func (m *Manager) Leave(c Tracker) {
 	}
 }
 
-func (m *Manager) PushUploaded(size int64) {
-	m.uploadTotal.Add(size)
+func (m *Manager) PushUploaded(size int64, outbound string) {
+	m.uploadTotal[outbound].Add(size)
 }
 
-func (m *Manager) PushDownloaded(size int64) {
-	m.downloadTotal.Add(size)
+func (m *Manager) PushDownloaded(size int64, outbound string) {
+	m.downloadTotal[outbound].Add(size)
+}
+
+func (m *Manager) TotalOutbound(outbound string) (up int64, down int64) {
+	if upCounter, ok := m.uploadTotal[outbound]; ok {
+		up = upCounter.Load()
+	}
+	if downCounter, ok := m.downloadTotal[outbound]; ok {
+		down = downCounter.Load()
+	}
+	return
 }
 
 func (m *Manager) Total() (up int64, down int64) {
-	return m.uploadTotal.Load(), m.downloadTotal.Load()
+	for _, v := range m.uploadTotal {
+		up += v.Load()
+	}
+	for _, v := range m.downloadTotal {
+		down += v.Load()
+	}
+	return
 }
 
 func (m *Manager) ConnectionsLen() int {
@@ -99,18 +127,23 @@ func (m *Manager) Snapshot() *Snapshot {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	m.memory = memStats.StackInuse + memStats.HeapInuse + memStats.HeapIdle - memStats.HeapReleased
+	uploadTotal, downloadTotal := m.Total()
 
 	return &Snapshot{
-		Upload:      m.uploadTotal.Load(),
-		Download:    m.downloadTotal.Load(),
+		Upload:      uploadTotal,
+		Download:    downloadTotal,
 		Connections: connections,
 		Memory:      m.memory,
 	}
 }
 
 func (m *Manager) ResetStatistic() {
-	m.uploadTotal.Store(0)
-	m.downloadTotal.Store(0)
+	for _, u := range m.uploadTotal {
+		u.Store(0)
+	}
+	for _, d := range m.downloadTotal {
+		d.Store(0)
+	}
 }
 
 type Snapshot struct {

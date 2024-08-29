@@ -5,6 +5,7 @@ go 1.24.7
 require (
 	github.com/anytls/sing-anytls v0.0.8
 	github.com/caddyserver/certmagic v0.23.0
+	github.com/ccding/go-stun v0.1.5
 	github.com/coder/websocket v1.8.13
 	github.com/cretz/bine v0.2.0
 	github.com/go-chi/chi/v5 v5.2.3
@@ -15,6 +16,7 @@ require (
 	github.com/libdns/alidns v1.0.5-libdns.v1.beta1
 	github.com/libdns/cloudflare v0.2.2-0.20250708034226-c574dccb31a6
 	github.com/logrusorgru/aurora v2.0.3+incompatible
+	github.com/matsuridayo/libneko v0.0.0-20240702024904-1c47a3af7199
 	github.com/metacubex/mihomo v1.19.13
 	github.com/metacubex/tfo-go v0.0.0-20250827083229-aa432b865617
 	github.com/metacubex/utls v1.8.1-0.20250823120917-12f5ba126142
@@ -42,6 +44,7 @@ require (
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.1
+	github.com/ulikunitz/xz v0.5.15
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/zap v1.27.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
