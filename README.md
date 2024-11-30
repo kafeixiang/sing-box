@@ -48,6 +48,24 @@ Port Hopping Strategies:
    **仅改变服务端端口**，客户端端口保持不变。 这种策略只修改五元组中的目的端口部分。 该策略源自 `mohomo` 的实现。
    在某些场景下，只改变服务端端口可能足以达到绕过某些针对特定服务端端口的限制的目的。
 
+## Dialer
+
+```json
+{
+   "outbounds": [
+      {
+         "type": "direct",
+         "tag": "direct",
+         
+         "tcp_keep_alive_interval": "15s",
+         "tcp_keep_alive_idle": "10min"
+      }
+   ]
+}
+```
+
+TCP Keep alive options.
+
 ## License
 
 ```

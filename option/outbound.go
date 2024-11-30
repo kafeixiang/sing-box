@@ -86,6 +86,9 @@ type DialerOptions struct {
 
 	// Deprecated: migrated to domain resolver
 	DomainStrategy DomainStrategy `json:"domain_strategy,omitempty"`
+
+	TCPKeepAliveInterval badoption.Duration `json:"tcp_keep_alive_interval,omitempty"`
+	TCPKeepAliveIdle     badoption.Duration `json:"tcp_keep_alive_idle,omitempty"`
 }
 
 type _DomainResolveOptions struct {
