@@ -58,6 +58,8 @@ require (
 
 //replace github.com/sagernet/sing => ../sing
 
+replace github.com/sagernet/sing-quic => github.com/xchacha20-poly1305/sing-quic v0.5.0-beta.3.0.20250708065244-53f102a4c99c
+
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/ajg/form v1.5.1 // indirect

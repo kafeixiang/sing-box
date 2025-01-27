@@ -13,7 +13,6 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/protocol/tuic"
 	"github.com/sagernet/sing-quic/hysteria"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
@@ -28,8 +27,8 @@ func RegisterOutbound(registry *outbound.Registry) {
 }
 
 var (
-	_ adapter.Outbound                = (*tuic.Outbound)(nil)
-	_ adapter.InterfaceUpdateListener = (*tuic.Outbound)(nil)
+	_ adapter.Outbound                = (*Outbound)(nil)
+	_ adapter.InterfaceUpdateListener = (*Outbound)(nil)
 )
 
 type Outbound struct {
@@ -69,6 +68,20 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	} else {
 		receiveBps = uint64(options.DownMbps) * hysteria.MbpsToBps
 	}
+	var hopStrategy hysteria.HopStrategy
+	if len(options.ServerPorts) > 0 {
+		if options.HopInterval.Build() <= 5*time.Second {
+			return nil, E.New("hop interval must be greater than 5 seconds")
+		}
+		switch options.HopStrategy {
+		case "", "origin", "both":
+			hopStrategy = hysteria.HopBoth
+		case "server":
+			hopStrategy = hysteria.HopServer
+		default:
+			return nil, E.New("unknown hop strategy: ", options.HopStrategy)
+		}
+	}
 	client, err := hysteria.NewClient(hysteria.ClientOptions{
 		Context:             ctx,
 		Dialer:              outboundDialer,
@@ -85,6 +98,8 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		ConnReceiveWindow:   options.ReceiveWindowConn,
 		StreamReceiveWindow: options.ReceiveWindow,
 		DisableMTUDiscovery: options.DisableMTUDiscovery,
+
+		HopStrategy: hopStrategy,
 	})
 	if err != nil {
 		return nil, err

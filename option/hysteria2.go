@@ -121,4 +121,6 @@ type Hysteria2OutboundOptions struct {
 	Network     NetworkList                `json:"network,omitempty"`
 	OutboundTLSOptionsContainer
 	BrutalDebug bool `json:"brutal_debug,omitempty"`
+
+	HopStrategy string `json:"hop_strategy,omitempty"`
 }
