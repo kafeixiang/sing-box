@@ -11,10 +11,10 @@ replace github.com/sagernet/sing-box => ../
 require (
 	github.com/docker/docker v27.3.1+incompatible
 	github.com/docker/go-connections v0.5.0
-	github.com/gofrs/uuid/v5 v5.3.1
+	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/sagernet/quic-go v0.49.0-beta.1
-	github.com/sagernet/sing v0.6.4-0.20250319121229-11d8838dc56d
-	github.com/sagernet/sing-quic v0.4.1-beta.1
+	github.com/sagernet/sing v0.6.7-0.20250409030945-77e2a1bb577c
+	github.com/sagernet/sing-quic v0.4.1
 	github.com/sagernet/sing-shadowsocks v0.2.7
 	github.com/sagernet/sing-shadowsocks2 v0.2.0
 	github.com/spyzhov/ajson v0.9.4
@@ -30,14 +30,14 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
-	github.com/anytls/sing-anytls v0.0.6 // indirect
+	github.com/anytls/sing-anytls v0.0.8 // indirect
 	github.com/bits-and-blooms/bitset v1.13.0 // indirect
 	github.com/caddyserver/certmagic v0.21.7 // indirect
 	github.com/caddyserver/zerossl v0.1.3 // indirect
 	github.com/cloudflare/circl v1.6.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
+	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/cretz/bine v0.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
@@ -83,6 +83,9 @@ require (
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/sdnotify v1.0.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/metacubex/chacha v0.1.0 // indirect
+	github.com/metacubex/mihomo v1.19.2 // indirect
+	github.com/metacubex/randv2 v0.2.0 // indirect
 	github.com/metacubex/tfo-go v0.0.0-20241231083714-66613d49c422 // indirect
 	github.com/mholt/acmez/v3 v3.0.1 // indirect
 	github.com/miekg/dns v1.1.63 // indirect
@@ -103,19 +106,20 @@ require (
 	github.com/sagernet/bbolt v0.0.0-20231014093535-ea5cb2fe9f0a // indirect
 	github.com/sagernet/cors v1.2.1 // indirect
 	github.com/sagernet/fswatch v0.1.1 // indirect
-	github.com/sagernet/gvisor v0.0.0-20241123041152-536d05261cff // indirect
+	github.com/sagernet/gvisor v0.0.0-20250325023245-7a9c0f5725fb // indirect
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a // indirect
 	github.com/sagernet/nftables v0.3.0-beta.4 // indirect
 	github.com/sagernet/reality v0.0.0-20230406110435-ee17307e7691 // indirect
 	github.com/sagernet/sing-mux v0.3.1 // indirect
 	github.com/sagernet/sing-shadowtls v0.2.1-0.20250316154757-6f9e732e5056 // indirect
-	github.com/sagernet/sing-tun v0.6.2-0.20250319123703-35b5747b44ec // indirect
+	github.com/sagernet/sing-tun v0.6.5-0.20250412112220-15069fc1c20a // indirect
 	github.com/sagernet/sing-vmess v0.2.0 // indirect
 	github.com/sagernet/smux v0.0.0-20231208180855-7041f6ea79e7 // indirect
-	github.com/sagernet/tailscale v1.80.3-mod.0 // indirect
+	github.com/sagernet/tailscale v1.80.3-mod.2 // indirect
 	github.com/sagernet/utls v1.6.7 // indirect
 	github.com/sagernet/wireguard-go v0.0.1-beta.5 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20231202035212-d3fa0460f47e // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/golang-x-crypto v0.0.0-20240604161659-3fde5e568aa4 // indirect
@@ -128,6 +132,7 @@ require (
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
+	gitlab.com/go-extension/aes-ccm v0.0.0-20230221065045-e58665ef23c7 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.56.0 // indirect
 	go.opentelemetry.io/otel v1.32.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.31.0 // indirect
