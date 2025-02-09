@@ -5,6 +5,7 @@ go 1.23.1
 require (
 	github.com/anytls/sing-anytls v0.0.8
 	github.com/caddyserver/certmagic v0.23.0
+	github.com/ccding/go-stun v0.1.5
 	github.com/cloudflare/circl v1.6.1
 	github.com/cretz/bine v0.2.0
 	github.com/go-chi/chi/v5 v5.2.1
@@ -14,6 +15,8 @@ require (
 	github.com/libdns/alidns v1.0.4-libdns.v1.beta1
 	github.com/libdns/cloudflare v0.2.2-0.20250430151523-b46a2b0885f6
 	github.com/logrusorgru/aurora v2.0.3+incompatible
+	github.com/matsuridayo/libneko v0.0.0-20240702024904-1c47a3af7199
+	github.com/metacubex/mihomo v1.19.2
 	github.com/metacubex/tfo-go v0.0.0-20241231083714-66613d49c422
 	github.com/metacubex/utls v1.7.0-alpha.2
 	github.com/mholt/acmez/v3 v3.1.2
@@ -40,6 +43,7 @@ require (
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
+	github.com/ulikunitz/xz v0.5.12
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/zap v1.27.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
@@ -50,13 +54,17 @@ require (
 	golang.org/x/sys v0.32.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.72.0
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.5
+	grpc_server v0.0.0-00010101000000-000000000000
 	howett.net/plist v1.0.1
 )
+
+replace grpc_server => ./cmd/sing-box/grpc_server
 
 //replace github.com/sagernet/sing => ../sing
 
 require (
+	cloud.google.com/go/compute/metadata v0.6.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
@@ -66,7 +74,7 @@ require (
 	github.com/caddyserver/zerossl v0.1.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/coder/websocket v1.8.12 // indirect
-	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
+	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dgrijalva/jwt-go/v4 v4.0.0-preview1 // indirect
@@ -87,6 +95,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/csrf v1.7.3-0.20250123201450-9dd6af1f6d30 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/illarion/gonotify/v2 v2.0.3 // indirect
@@ -100,6 +109,8 @@ require (
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/sdnotify v1.0.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/metacubex/chacha v0.1.0 // indirect
+	github.com/metacubex/randv2 v0.2.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -108,6 +119,7 @@ require (
 	github.com/safchain/ethtool v0.3.0 // indirect
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a // indirect
 	github.com/sagernet/nftables v0.3.0-beta.4 // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20231202035212-d3fa0460f47e // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
@@ -120,6 +132,7 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
+	gitlab.com/go-extension/aes-ccm v0.0.0-20230221065045-e58665ef23c7 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
