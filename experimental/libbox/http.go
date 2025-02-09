@@ -46,11 +46,14 @@ type HTTPRequest interface {
 	SetContentString(content string)
 	RandomUserAgent()
 	SetUserAgent(userAgent string)
+	AllowInsecure()
 	Execute() (HTTPResponse, error)
 }
 
 type HTTPResponse interface {
+	GetHeader(string) string
 	GetContent() (*StringBox, error)
+	GetContentString() (string, error)
 	WriteTo(path string) error
 }
 
@@ -66,7 +69,7 @@ type httpClient struct {
 	transport http.Transport
 }
 
-func NewHTTPClient() HTTPClient {
+func NewHttpClient() HTTPClient {
 	client := new(httpClient)
 	client.client.Transport = &client.transport
 	client.transport.ForceAttemptHTTP2 = true
@@ -177,6 +180,10 @@ func (r *httpRequest) SetUserAgent(userAgent string) {
 	r.request.Header.Set("User-Agent", userAgent)
 }
 
+func (r *httpRequest) AllowInsecure() {
+	r.tls.InsecureSkipVerify = true
+}
+
 func (r *httpRequest) SetContent(content []byte) {
 	buffer := bytes.Buffer{}
 	buffer.Write(content)
@@ -216,6 +223,10 @@ func (h *httpResponse) errorString() string {
 	return fmt.Sprint("HTTP ", h.Status, ": ", content)
 }
 
+func (h *httpResponse) GetHeader(key string) string {
+	return h.Header.Get(key)
+}
+
 func (h *httpResponse) GetContent() (*StringBox, error) {
 	h.getContentOnce.Do(func() {
 		defer h.Body.Close()
@@ -225,6 +236,17 @@ func (h *httpResponse) GetContent() (*StringBox, error) {
 		return nil, h.contentError
 	}
 	return wrapString(string(h.content)), nil
+}
+
+func (h *httpResponse) GetContentString() (string, error) {
+	h.getContentOnce.Do(func() {
+		defer h.Body.Close()
+		h.content, h.contentError = io.ReadAll(h.Body)
+	})
+	if h.contentError != nil {
+		return "", h.contentError
+	}
+	return string(h.content), nil
 }
 
 func (h *httpResponse) WriteTo(path string) error {
