@@ -74,7 +74,7 @@ type BoxInstance struct {
 	ForTest bool
 }
 
-func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
+func NewSingBoxInstance(configContent string, forTest bool) (b *BoxInstance, err error) {
 	defer DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
 	ctx := BaseContext(intfBox)
@@ -89,6 +89,7 @@ func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
 		platformInterfaceWrapper: platformInterfaceWrapper{
 			iif:       intfBox,
 			useProcFS: intfBox.UseProcFS(),
+			isTest:    forTest,
 		},
 	}
 	service.MustRegister[platform.Interface](ctx, platformWrapper)
@@ -106,6 +107,7 @@ func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
 		Box:          instance,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
+		ForTest:      forTest,
 	}
 
 	// selector

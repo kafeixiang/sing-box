@@ -1,7 +1,7 @@
 package libbox
 
 import (
-	"github.com/sagernet/sing-tun"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -21,10 +21,16 @@ type platformDefaultInterfaceMonitor struct {
 }
 
 func (m *platformDefaultInterfaceMonitor) Start() error {
+	if m.isTest {
+		return m.networkManager.UpdateInterfaces()
+	}
 	return m.iif.StartDefaultInterfaceMonitor(m)
 }
 
 func (m *platformDefaultInterfaceMonitor) Close() error {
+	if m.isTest {
+		return nil
+	}
 	return m.iif.CloseDefaultInterfaceMonitor(m)
 }
 
