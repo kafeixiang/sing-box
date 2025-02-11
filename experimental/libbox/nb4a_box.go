@@ -12,17 +12,17 @@ import (
 
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/boxapi"
+	"github.com/sagernet/sing-box/common/conntrack"
+	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
 	"github.com/sagernet/sing-box/experimental/v2rayapi"
-	"github.com/sagernet/sing-box/protocol/group"
-
-	box "github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/common/conntrack"
-	"github.com/sagernet/sing-box/constant"
 	_ "github.com/sagernet/sing-box/include"
+	boxLog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/group"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/pause"
@@ -72,11 +72,10 @@ type BoxInstance struct {
 	pauseManager pause.Manager
 }
 
-func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
+func NewSingBoxInstance(configContent string, forTest bool) (b *BoxInstance, err error) {
 	defer DeferPanicToError("NewSingBoxInstance", func(err_ error) { err = err_ })
 
 	ctx := BaseContext(intfBox)
-	service.MustRegister[deprecated.Manager](ctx, new(deprecatedManager))
 	options, err := parseConfig(ctx, configContent)
 	if err != nil {
 		return nil, err
@@ -87,13 +86,19 @@ func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
 		platformInterfaceWrapper: platformInterfaceWrapper{
 			iif:       intfBox,
 			useProcFS: intfBox.UseProcFS(),
+			isTest:    forTest,
 		},
 	}
 	service.MustRegister[platform.Interface](ctx, platformWrapper)
+	var platformLogWriter boxLog.PlatformWriter
+	if !forTest {
+		platformLogWriter = platformWrapper
+		service.MustRegister[deprecated.Manager](ctx, new(deprecatedManager))
+	}
 	instance, err := box.New(box.Options{
 		Context:           ctx,
 		Options:           options,
-		PlatformLogWriter: platformWrapper,
+		PlatformLogWriter: platformLogWriter,
 	})
 	if err != nil {
 		cancel()
@@ -102,6 +107,7 @@ func NewSingBoxInstance(configContent string) (b *BoxInstance, err error) {
 
 	b = &BoxInstance{
 		Box:          instance,
+		ctx:          ctx,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
