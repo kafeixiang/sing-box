@@ -203,6 +203,10 @@ func (r *Router) Rules() []adapter.Rule {
 	return r.rules
 }
 
+func (r *Router) Tracker() adapter.ConnectionTracker {
+	return r.tracker
+}
+
 func (r *Router) SetTracker(tracker adapter.ConnectionTracker) {
 	r.tracker = tracker
 }

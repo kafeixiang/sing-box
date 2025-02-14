@@ -14,6 +14,7 @@ import (
 	"github.com/matsuridayo/libneko/speedtest"
 	boxbox "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/boxapi"
+	"github.com/sagernet/sing-box/experimental/v2rayapi"
 
 	"log"
 
@@ -51,7 +52,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		instance.SetLogWritter(neko_log.LogWriter)
 		// V2ray Service
 		if in.StatsOutbounds != nil && !in.DisableStats {
-			instance.Router().SetV2RayServer(boxapi.NewSbV2rayServer(option.V2RayStatsServiceOptions{
+			instance.Router().SetTracker(v2rayapi.NewStatsService(option.V2RayStatsServiceOptions{
 				Enabled:   true,
 				Outbounds: in.StatsOutbounds,
 			}))
@@ -132,11 +133,15 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (out *gen.TestResp, 
 }
 
 func (s *server) QueryStats(ctx context.Context, in *gen.QueryStatsReq) (out *gen.QueryStatsResp, _ error) {
-	out = &gen.QueryStatsResp{}
+	out = &gen.QueryStatsResp{Traffic: 0}
 
-	if instance != nil && instance.Router().V2RayServer() != nil {
-		if ss, ok := instance.Router().V2RayServer().(*boxapi.SbV2rayServer); ok {
-			out.Traffic = ss.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", in.Tag, in.Direct))
+	if instance != nil {
+		if ss, ok := instance.Router().Tracker().(*v2rayapi.StatsService); ok {
+			name := fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", in.Tag, in.Direct)
+			statsResponse, err := ss.GetStats(context.TODO(), &v2rayapi.GetStatsRequest{Name: name, Reset_: true})
+			if err == nil {
+				out.Traffic = statsResponse.Stat.Value
+			}
 		}
 	}
 
