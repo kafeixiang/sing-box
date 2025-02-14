@@ -7,15 +7,23 @@ import (
 	"syscall"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/experimental/deprecated"
+	"github.com/sagernet/sing-box/include"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/sagernet/sing/service"
 )
 
 var nekoCtx = context.TODO()
 
 func Create(nekoConfigContent []byte) (*box.Box, context.CancelFunc, error) {
+	nekoCtx := context.TODO()
+	nekoCtx = service.ContextWith(nekoCtx, deprecated.NewStderrManager(log.StdLogger()))
+	nekoCtx = box.Context(nekoCtx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), include.DNSTransportRegistry())
+
 	var options option.Options
-	err := options.UnmarshalJSON(nekoConfigContent)
+	err := options.UnmarshalJSONContext(nekoCtx, nekoConfigContent)
 	if err != nil {
 		return nil, nil, err
 	}

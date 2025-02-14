@@ -10,6 +10,7 @@ import (
 	"github.com/sagernet/sing-box/common/taskmonitor"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
+	"github.com/sagernet/sing-box/experimental/v2rayapi"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	R "github.com/sagernet/sing-box/route/rule"
@@ -201,6 +202,15 @@ func (r *Router) NeedWIFIState() bool {
 
 func (r *Router) Rules() []adapter.Rule {
 	return r.rules
+}
+
+func (r *Router) GetV2rayTracker() adapter.ConnectionTracker {
+	for _, tracker := range r.trackers {
+		if ss, ok := tracker.(*v2rayapi.StatsService); ok {
+			return ss
+		}
+	}
+	return nil
 }
 
 func (r *Router) AppendTracker(tracker adapter.ConnectionTracker) {
