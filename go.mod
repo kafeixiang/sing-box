@@ -32,7 +32,7 @@ require (
 	github.com/sagernet/sing v0.6.1
 	github.com/sagernet/sing-dns v0.4.0
 	github.com/sagernet/sing-mux v0.3.1
-	github.com/sagernet/sing-quic v0.4.0
+	github.com/sagernet/sing-quic v0.4.1-beta.1
 	github.com/sagernet/sing-shadowsocks v0.2.7
 	github.com/sagernet/sing-shadowsocks2 v0.2.0
 	github.com/sagernet/sing-shadowtls v0.2.0
