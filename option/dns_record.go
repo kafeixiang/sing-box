@@ -2,12 +2,12 @@ package option
 
 import (
 	"encoding/base64"
-
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/common/json/badoption"
+	M "github.com/sagernet/sing/common/metadata"
 
 	"github.com/miekg/dns"
 )
@@ -134,6 +134,9 @@ func (o *DNSRecordOptions) UnmarshalJSON(data []byte) error {
 	record, err := dns.NewRR(stringValue)
 	if err != nil {
 		return err
+	}
+	if a, isA := record.(*dns.A); isA {
+		a.A = M.AddrFromIP(a.A).Unmap().AsSlice()
 	}
 	o.RR = record
 	return nil
