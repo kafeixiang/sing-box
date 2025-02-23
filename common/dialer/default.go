@@ -22,6 +22,8 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
+var DoNotSelectInterface = false
+
 var (
 	_ ParallelInterfaceDialer = (*DefaultDialer)(nil)
 	_ WireGuardListener       = (*DefaultDialer)(nil)
@@ -232,7 +234,7 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 	} else if address.IsFqdn() {
 		return nil, E.New("domain not resolved")
 	}
-	if d.networkStrategy == nil {
+	if DoNotSelectInterface || d.networkStrategy == nil {
 		return trackConn(listener.ListenNetworkNamespace[net.Conn](d.netns, func() (net.Conn, error) {
 			switch N.NetworkName(network) {
 			case N.NetworkUDP:
@@ -302,7 +304,7 @@ func (d *DefaultDialer) DialParallelInterface(ctx context.Context, network strin
 }
 
 func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if d.networkStrategy == nil {
+	if DoNotSelectInterface || d.networkStrategy == nil {
 		return trackPacketConn(listener.ListenNetworkNamespace[net.PacketConn](d.netns, func() (net.PacketConn, error) {
 			if destination.IsIPv6() {
 				return d.udpListener.ListenPacket(ctx, N.NetworkUDP, d.udpAddr6)
