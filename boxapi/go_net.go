@@ -15,7 +15,7 @@ func DialContext(ctx context.Context, box *box.Box, network, addr string) (net.C
 	if err != nil {
 		return nil, err
 	}
-	if vs := box.Router().GetTracker(); vs != nil {
+	if vs := box.Router().GetNekoTracker(); vs != nil {
 		if ss, ok := vs.(*SbStatsService); ok {
 			conn = ss.RoutedConnectionInternal("", defOutboundTag, "", conn, false)
 		}

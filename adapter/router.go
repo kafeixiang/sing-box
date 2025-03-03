@@ -38,7 +38,8 @@ type Router interface {
 	ClearDNSCache()
 	Rules() []Rule
 
-	GetTracker() ConnectionTracker
+	GetNekoTracker() ConnectionTracker
+	SetNekoTracker(tracker ConnectionTracker)
 	SetTracker(tracker ConnectionTracker)
 
 	ResetNetwork()

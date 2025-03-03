@@ -65,6 +65,7 @@ type Router struct {
 	processSearcher         process.Searcher
 	pauseManager            pause.Manager
 	tracker                 adapter.ConnectionTracker
+	nekoTracker             adapter.ConnectionTracker
 	platformInterface       platform.Interface
 	needWIFIState           bool
 	started                 bool
@@ -511,8 +512,12 @@ func (r *Router) Rules() []adapter.Rule {
 	return r.rules
 }
 
-func (r *Router) GetTracker() adapter.ConnectionTracker {
-	return r.tracker
+func (r *Router) GetNekoTracker() adapter.ConnectionTracker {
+	return r.nekoTracker
+}
+
+func (r *Router) SetNekoTracker(tracker adapter.ConnectionTracker) {
+	r.nekoTracker = tracker
 }
 
 func (r *Router) SetTracker(tracker adapter.ConnectionTracker) {
