@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/matsuridayo/libneko/neko_common"
-
-	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type BaseServer struct {
@@ -32,6 +32,54 @@ func (s *BaseServer) Exit(ctx context.Context, in *gen.EmptyReq) (out *gen.Empty
 	// Connection closed
 	os.Exit(0)
 	return
+}
+
+// UnaryInterceptor for authentication
+func authUnaryInterceptor(authenticator auth.Authenticator) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		newCtx, err := authenticator.Authenticate(ctx)
+		if err != nil {
+			return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
+		}
+		return handler(newCtx, req)
+	}
+}
+
+// StreamInterceptor for authentication
+func authStreamInterceptor(authenticator auth.Authenticator) grpc.StreamServerInterceptor {
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		newCtx, err := authenticator.Authenticate(ss.Context())
+		if err != nil {
+			return status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
+		}
+
+		// Create a new wrapped stream with the authenticated context
+		wrappedStream := &wrappedServerStream{
+			ServerStream: ss,
+			ctx:          newCtx,
+		}
+		return handler(srv, wrappedStream)
+	}
+}
+
+// wrappedServerStream is a custom ServerStream that overrides Context()
+type wrappedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedServerStream) Context() context.Context {
+	return w.ctx
 }
 
 func RunCore(setupCore func(), server gen.LibcoreServiceServer) {
@@ -89,8 +137,8 @@ func RunCore(setupCore func(), server gen.LibcoreServiceServer) {
 	}
 
 	s := grpc.NewServer(
-		grpc.StreamInterceptor(grpc_auth.StreamServerInterceptor(auther.Authenticate)),
-		grpc.UnaryInterceptor(grpc_auth.UnaryServerInterceptor(auther.Authenticate)),
+		grpc.StreamInterceptor(authStreamInterceptor(auther)),
+		grpc.UnaryInterceptor(authUnaryInterceptor(auther)),
 	)
 	gen.RegisterLibcoreServiceServer(s, server)
 
