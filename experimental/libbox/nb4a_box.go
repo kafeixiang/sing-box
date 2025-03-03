@@ -2,8 +2,8 @@ package libbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"runtime"
@@ -16,12 +16,10 @@ import (
 	"github.com/sagernet/sing-box/boxapi"
 	"github.com/sagernet/sing-box/common/conntrack"
 	"github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/clashapi"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/experimental/libbox/platform"
-	"github.com/sagernet/sing-box/experimental/v2rayapi"
-	_ "github.com/sagernet/sing-box/include"
 	boxLog "github.com/sagernet/sing-box/log"
-	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/group"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
@@ -61,15 +59,20 @@ func ResetAllConnections(system bool) {
 	}
 }
 
+type TrafficStats struct {
+	Ups   map[string]int64 `json:"ups"`
+	Downs map[string]int64 `json:"downs"`
+}
+
 type BoxInstance struct {
 	*box.Box
 	ctx    context.Context
 	cancel context.CancelFunc
 	state  int
 
-	v2api        *v2rayapi.StatsService
 	selector     *group.Selector
 	pauseManager pause.Manager
+	trafficStats TrafficStats
 }
 
 func NewSingBoxInstance(configContent string, forTest bool) (b *BoxInstance, err error) {
@@ -112,10 +115,12 @@ func NewSingBoxInstance(configContent string, forTest bool) (b *BoxInstance, err
 		pauseManager: service.FromContext[pause.Manager](ctx),
 	}
 
-	// selector
-	if proxy, ok := b.Box.Outbound().Outbound("proxy"); ok {
-		if selector, ok := proxy.(*group.Selector); ok {
-			b.selector = selector
+	if !forTest {
+		// selector
+		if proxy, ok := b.Box.Outbound().Outbound("proxy"); ok {
+			if selector, ok := proxy.(*group.Selector); ok {
+				b.selector = selector
+			}
 		}
 	}
 
@@ -168,23 +173,31 @@ func (b *BoxInstance) SetAsMain() {
 	goServeProtect(true)
 }
 
-func (b *BoxInstance) SetV2rayStats(outbounds string) {
-	b.v2api = v2rayapi.NewStatsService(option.V2RayStatsServiceOptions{
-		Enabled:   true,
-		Outbounds: strings.Split(outbounds, "\n"),
-	})
-	b.Box.Router().SetTracker(b.v2api)
+func (b *BoxInstance) QueryStats() TrafficStats {
+	trafficStats := TrafficStats{Ups: make(map[string]int64), Downs: make(map[string]int64)}
+	if b.trafficStats.Ups == nil || b.trafficStats.Downs == nil {
+		b.trafficStats.Ups = make(map[string]int64)
+		b.trafficStats.Downs = make(map[string]int64)
+	}
+	if clashServer, ok := b.Router().GetClashTracker().(*clashapi.Server); ok {
+		for _, out := range b.Outbound().Outbounds() {
+			tag := out.Tag()
+			up, down := clashServer.TrafficManager().TotalOutbound(tag)
+			trafficStats.Ups[tag] = up - b.trafficStats.Ups[tag]
+			trafficStats.Downs[tag] = down - b.trafficStats.Downs[tag]
+			b.trafficStats.Ups[tag] = up
+			b.trafficStats.Downs[tag] = down
+		}
+	}
+	return trafficStats
 }
 
-func (b *BoxInstance) QueryStats(tag, direct string) int64 {
-	if b.v2api == nil {
-		return 0
-	}
-	stats, err := b.v2api.GetStats(context.TODO(), &v2rayapi.GetStatsRequest{Name: fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct), Reset_: true})
+func (b *BoxInstance) QueryStats2JSON() string {
+	data, err := json.Marshal(b.QueryStats())
 	if err != nil {
-		return 0
+		return "{}"
 	}
-	return stats.Stat.Value
+	return string(data)
 }
 
 func (b *BoxInstance) SelectOutbound(tag string) bool {

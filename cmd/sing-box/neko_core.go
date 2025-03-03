@@ -15,7 +15,7 @@ var instance *boxbox.Box
 var instance_cancel context.CancelFunc
 
 func setupCore() {
-	SetDisableColor(true)
+	disableColor = true
 	//
 	neko_log.SetupLog(50*1024, "./neko.log")
 	//
