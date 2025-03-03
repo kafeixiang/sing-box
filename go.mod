@@ -5,7 +5,7 @@ go 1.23.1
 toolchain go1.23.6
 
 require (
-	github.com/anytls/sing-anytls v0.0.5
+	github.com/anytls/sing-anytls v0.0.6
 	github.com/caddyserver/certmagic v0.20.0
 	github.com/cloudflare/circl v1.3.7
 	github.com/cretz/bine v0.2.0
