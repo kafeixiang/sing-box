@@ -15,7 +15,7 @@ func DialContext(ctx context.Context, box *box.Box, network, addr string) (net.C
 	if err != nil {
 		return nil, err
 	}
-	if tracker := box.Router().GetV2rayTracker(); tracker != nil {
+	if tracker := box.Router().GetClashTracker(); tracker != nil {
 		conn = tracker.RoutedConnection(ctx, conn, adapter.InboundContext{}, nil, defaultOutbound)
 	}
 	return conn, nil

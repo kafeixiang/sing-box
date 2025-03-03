@@ -15,7 +15,7 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
-var nekoCtx = context.TODO()
+// var nekoCtx = context.TODO()
 
 func Create(nekoConfigContent []byte) (*box.Box, context.CancelFunc, error) {
 	nekoCtx := context.TODO()
@@ -64,8 +64,4 @@ func Create(nekoConfigContent []byte) (*box.Box, context.CancelFunc, error) {
 		return nil, nil, E.Cause(err, "start service")
 	}
 	return instance, cancel, nil
-}
-
-func SetDisableColor(dc bool) {
-	disableColor = dc
 }

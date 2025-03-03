@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"grpc_server"
@@ -14,12 +13,12 @@ import (
 	"github.com/matsuridayo/libneko/speedtest"
 	boxbox "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/boxapi"
-	"github.com/sagernet/sing-box/experimental/v2rayapi"
+	"github.com/sagernet/sing-box/experimental/libbox"
 
 	"log"
-
-	"github.com/sagernet/sing-box/option"
 )
+
+var mainInstance *libbox.BoxInstance
 
 type server struct {
 	grpc_server.BaseServer
@@ -48,15 +47,8 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	instance, instance_cancel, err = Create([]byte(in.CoreConfig))
 
 	if instance != nil {
-		// Logger
 		instance.SetLogWritter(neko_log.LogWriter)
-		// V2ray Service
-		if in.StatsOutbounds != nil && !in.DisableStats {
-			instance.Router().AppendTracker(v2rayapi.NewStatsService(option.V2RayStatsServiceOptions{
-				Enabled:   true,
-				Outbounds: in.StatsOutbounds,
-			}))
-		}
+		mainInstance = &libbox.BoxInstance{Box: instance}
 	}
 
 	return
@@ -132,17 +124,16 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (out *gen.TestResp, 
 	return
 }
 
-func (s *server) QueryStats(ctx context.Context, in *gen.QueryStatsReq) (out *gen.QueryStatsResp, _ error) {
-	out = &gen.QueryStatsResp{Traffic: 0}
+func (s *server) QueryStats(ctx context.Context, _ *gen.EmptyReq) (resp *gen.QueryStatsResp, _ error) {
+	resp = &gen.QueryStatsResp{
+		Ups:   make(map[string]int64),
+		Downs: make(map[string]int64),
+	}
 
 	if instance != nil {
-		if tracker := instance.Router().GetV2rayTracker(); tracker != nil {
-			name := fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", in.Tag, in.Direct)
-			statsResponse, err := tracker.(*v2rayapi.StatsService).GetStats(context.TODO(), &v2rayapi.GetStatsRequest{Name: name, Reset_: true})
-			if err == nil {
-				out.Traffic = statsResponse.Stat.Value
-			}
-		}
+		trafficStats := mainInstance.QueryStats()
+		resp.Ups = trafficStats.Ups
+		resp.Downs = trafficStats.Downs
 	}
 
 	return
