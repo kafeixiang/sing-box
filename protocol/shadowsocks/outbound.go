@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 
+	shadowsocksM "github.com/metacubex/sing-shadowsocks2"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
@@ -12,7 +13,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/sip003"
-	"github.com/sagernet/sing-shadowsocks2"
+	shadowsocks "github.com/sagernet/sing-shadowsocks2"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -42,7 +43,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Password: options.Password,
 	})
 	if err != nil {
-		return nil, err
+		if method, err = shadowsocksM.CreateMethod(ctx, options.Method, shadowsocksM.MethodOptions{Password: options.Password}); err != nil {
+			return nil, err
+		}
 	}
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
 	if err != nil {
