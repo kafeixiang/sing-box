@@ -58,6 +58,8 @@ type CacheFile interface {
 
 	LoadUIUpdateTime(uiDirectory string) time.Time
 	StoreUIUpdateTime(uiDirectory string, updateTime time.Time) error
+	LoadSubscription(tag string) *SavedBinary
+	SaveSubscription(tag string, sub *SavedBinary) error
 }
 
 type SavedBinary struct {
