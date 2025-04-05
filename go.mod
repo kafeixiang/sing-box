@@ -5,7 +5,7 @@ go 1.23.1
 toolchain go1.23.6
 
 require (
-	github.com/anytls/sing-anytls v0.0.6
+	github.com/anytls/sing-anytls v0.0.7
 	github.com/caddyserver/certmagic v0.20.0
 	github.com/cloudflare/circl v1.3.7
 	github.com/cretz/bine v0.2.0
@@ -29,7 +29,7 @@ require (
 	github.com/sagernet/gvisor v0.0.0-20241123041152-536d05261cff
 	github.com/sagernet/quic-go v0.49.0-beta.1
 	github.com/sagernet/reality v0.0.0-20230406110435-ee17307e7691
-	github.com/sagernet/sing v0.6.1
+	github.com/sagernet/sing v0.6.5
 	github.com/sagernet/sing-dns v0.4.0
 	github.com/sagernet/sing-mux v0.3.1
 	github.com/sagernet/sing-quic v0.4.1-beta.1
