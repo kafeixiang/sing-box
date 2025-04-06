@@ -60,10 +60,6 @@ func (r *Router) RouteConnectionEx(ctx context.Context, conn net.Conn, metadata 
 }
 
 func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
-	if r.pauseManager.IsDevicePaused() {
-		return E.New("reject connection to ", metadata.Destination, " while device paused")
-	}
-
 	//nolint:staticcheck
 	if metadata.InboundDetour != "" {
 		if metadata.LastInbound == metadata.InboundDetour {
@@ -189,9 +185,6 @@ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn,
 }
 
 func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
-	if r.pauseManager.IsDevicePaused() {
-		return E.New("reject packet connection to ", metadata.Destination, " while device paused")
-	}
 	//nolint:staticcheck
 	if metadata.InboundDetour != "" {
 		if metadata.LastInbound == metadata.InboundDetour {
@@ -555,7 +548,7 @@ func (r *Router) actionSniff(
 			sniffBuffer.Release()
 		}
 	} else if inputPacketConn != nil {
-		if metadata.PacketSniffError != nil && !errors.Is(metadata.PacketSniffError, sniff.ErrClientHelloFragmented) {
+		if metadata.PacketSniffError != nil && !errors.Is(metadata.PacketSniffError, sniff.ErrNeedMoreData) {
 			r.logger.DebugContext(ctx, "packet sniff skipped due to previous error: ", metadata.PacketSniffError)
 			return
 		}
@@ -624,7 +617,8 @@ func (r *Router) actionSniff(
 				}
 				packetBuffers = append(packetBuffers, packetBuffer)
 				metadata.PacketSniffError = err
-				if errors.Is(err, sniff.ErrClientHelloFragmented) {
+				if errors.Is(err, sniff.ErrNeedMoreData) {
+					// TODO: replace with generic message when there are more multi-packet protocols
 					r.logger.DebugContext(ctx, "attempt to sniff fragmented QUIC client hello")
 					continue
 				}
