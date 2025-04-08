@@ -58,6 +58,7 @@ func PeekStream(ctx context.Context, metadata *adapter.InboundContext, conn net.
 			return E.Cause(err, "read payload")
 		}
 		sniffError = nil
+		var needMoreData = false
 		for _, sniffer := range sniffers {
 			reader := io.MultiReader(common.Map(append(buffers, buffer), func(it *buf.Buffer) io.Reader {
 				return bytes.NewReader(it.Bytes())
@@ -66,9 +67,12 @@ func PeekStream(ctx context.Context, metadata *adapter.InboundContext, conn net.
 			if err == nil {
 				return nil
 			}
+			if errors.Is(err, ErrNeedMoreData) {
+				needMoreData = true
+			}
 			sniffError = E.Errors(sniffError, err)
 		}
-		if !errors.Is(err, ErrNeedMoreData) {
+		if !needMoreData {
 			break
 		}
 	}

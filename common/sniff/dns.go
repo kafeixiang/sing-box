@@ -9,7 +9,6 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing/common/buf"
-	E "github.com/sagernet/sing/common/exceptions"
 
 	mDNS "github.com/miekg/dns"
 )
@@ -18,7 +17,7 @@ func StreamDomainNameQuery(readCtx context.Context, metadata *adapter.InboundCon
 	var length uint16
 	err := binary.Read(reader, binary.BigEndian, &length)
 	if err != nil {
-		return E.Cause1(ErrNeedMoreData, err)
+		return os.ErrInvalid
 	}
 	if length == 0 {
 		return os.ErrInvalid
@@ -27,7 +26,7 @@ func StreamDomainNameQuery(readCtx context.Context, metadata *adapter.InboundCon
 	defer buffer.Release()
 	_, err = buffer.ReadFullFrom(reader, buffer.FreeLen())
 	if err != nil {
-		return E.Cause1(ErrNeedMoreData, err)
+		return os.ErrInvalid
 	}
 	return DomainNameQuery(readCtx, metadata, buffer.Bytes())
 }
@@ -37,6 +36,9 @@ func DomainNameQuery(ctx context.Context, metadata *adapter.InboundContext, pack
 	err := msg.Unpack(packet)
 	if err != nil {
 		return err
+	}
+	if len(msg.Question) == 0 {
+		return os.ErrInvalid
 	}
 	metadata.Protocol = C.ProtocolDNS
 	return nil

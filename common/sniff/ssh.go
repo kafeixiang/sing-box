@@ -8,7 +8,6 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
 func SSH(_ context.Context, metadata *adapter.InboundContext, reader io.Reader) error {
@@ -16,7 +15,7 @@ func SSH(_ context.Context, metadata *adapter.InboundContext, reader io.Reader) 
 	bReader := bufio.NewReader(reader)
 	prefix, err := bReader.Peek(len(sshPrefix))
 	if err != nil {
-		return E.Cause1(ErrNeedMoreData, err)
+		return os.ErrInvalid
 	} else if string(prefix) != sshPrefix {
 		return os.ErrInvalid
 	}
