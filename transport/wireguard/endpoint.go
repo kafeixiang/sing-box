@@ -142,6 +142,10 @@ func (e *Endpoint) Start(resolve bool) error {
 	}
 	var bind conn.Bind
 	wgListener, isWgListener := e.options.Dialer.(conn.Listener)
+	// `SetReservedForEndpoint` have bug, use old method `NewClientBind` until it's fixed
+	if len(e.peers) == 1 {
+		isWgListener = false
+	}
 	if isWgListener {
 		bind = conn.NewStdNetBind(wgListener)
 	} else {
