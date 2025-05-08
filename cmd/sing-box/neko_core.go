@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/matsuridayo/libneko/neko_common"
-	"github.com/matsuridayo/libneko/neko_log"
 	boxbox "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/boxapi"
 )
@@ -16,8 +15,6 @@ var instance_cancel context.CancelFunc
 
 func setupCore() {
 	disableColor = true
-	//
-	neko_log.SetupLog(50*1024, "./neko.log")
 	//
 	neko_common.GetCurrentInstance = func() interface{} {
 		return instance

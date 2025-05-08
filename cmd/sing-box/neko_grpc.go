@@ -9,7 +9,6 @@ import (
 	"grpc_server/gen"
 
 	"github.com/matsuridayo/libneko/neko_common"
-	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/matsuridayo/libneko/speedtest"
 	boxbox "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/boxapi"
@@ -47,7 +46,6 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	instance, instance_cancel, err = Create([]byte(in.CoreConfig))
 
 	if instance != nil {
-		instance.SetLogWritter(neko_log.LogWriter)
 		mainInstance = &libbox.BoxInstance{Box: instance}
 	}
 
