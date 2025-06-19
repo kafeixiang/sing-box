@@ -105,6 +105,22 @@ it will be rejected.
 
 `external_ui_update_interval`: Update interval of external UI. (Just check on start)
 
+## Naïve
+
+```json
+{
+  "inbounds": [
+    {
+      "type": "naive",
+      "tag": "naive-in",
+      "tolerate_unpadding": true
+    }
+  ]
+}
+```
+
+`tolerate_unpadding`: Allow client to send request without padding. 允许客户端发送未填充的请求。
+
 ## License
 
 ```
