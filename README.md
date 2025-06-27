@@ -57,6 +57,7 @@ Port Hopping Strategies:
     {
       "type": "direct",
       "tag": "direct",
+      "congestion_control": "bbr",
       "tcp_keep_alive_interval": "15s",
       "tcp_keep_alive_idle": "10min"
     }
@@ -64,7 +65,10 @@ Port Hopping Strategies:
 }
 ```
 
-TCP Keep alive options.
+* `congestion_control`: [Linux only] TCP congestion control.
+  Run `cat /proc/sys/net/ipv4/tcp_available_congestion_control` to see optional values.
+
+* `tcp_keep_alive_interval` and `tcp_keep_alive_idle`: TCP Keep alive options.
 
 ## Inbound TLS
 

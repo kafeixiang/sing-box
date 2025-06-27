@@ -89,6 +89,8 @@ type DialerOptions struct {
 
 	TCPKeepAliveInterval badoption.Duration `json:"tcp_keep_alive_interval,omitempty"`
 	TCPKeepAliveIdle     badoption.Duration `json:"tcp_keep_alive_idle,omitempty"`
+
+	CongestionControl string `json:"congestion_control,omitempty"`
 }
 
 type _DomainResolveOptions struct {
