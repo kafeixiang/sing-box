@@ -121,6 +121,22 @@ it will be rejected.
 
 `tolerate_unpadding`: Allow client to send request without padding. 允许客户端发送未填充的请求。
 
+## HTTP
+
+```json5
+{
+  "outbounds": [
+     {
+       "type": "http",
+        "tag": "http-out",
+        "udp_over_tcp": {} // or true
+     }
+  ]
+}
+```
+
+* `udp_over_tcp`: UDP over TCP field.
+
 ## License
 
 ```
