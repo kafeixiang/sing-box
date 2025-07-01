@@ -84,15 +84,24 @@ func NewSTDClient(ctx context.Context, serverAddress string, options option.Outb
 		tlsConfig.InsecureSkipVerify = options.Insecure
 	} else if options.DisableSNI {
 		tlsConfig.InsecureSkipVerify = true
-		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+		tlsConfig.VerifyConnection = func(state tls.ConnectionState) (err error) {
+			// Set roots to skip platform verifier
+			roots := tlsConfig.RootCAs
+			if roots == nil {
+				roots, err = x509.SystemCertPool()
+				if err != nil {
+					return
+				}
+			}
 			verifyOptions := x509.VerifyOptions{
 				DNSName:       serverName,
 				Intermediates: x509.NewCertPool(),
+				Roots:         roots,
 			}
 			for _, cert := range state.PeerCertificates[1:] {
 				verifyOptions.Intermediates.AddCert(cert)
 			}
-			_, err := state.PeerCertificates[0].Verify(verifyOptions)
+			_, err = state.PeerCertificates[0].Verify(verifyOptions)
 			return err
 		}
 	}
