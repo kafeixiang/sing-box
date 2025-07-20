@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/expiringpool"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
@@ -17,7 +17,6 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/x/list"
 
 	mDNS "github.com/miekg/dns"
 )
@@ -33,8 +32,7 @@ type TCPTransport struct {
 	dialer     N.Dialer
 	serverAddr M.Socksaddr
 
-	access      *sync.Mutex
-	connections *list.List[*reusableDNSConn]
+	connections *expiringpool.ExpiringPool[*reusableDNSConn]
 }
 
 func NewTCP(ctx context.Context, logger log.ContextLogger, tag string, options option.RemoteTCPDNSServerOptions) (adapter.DNSTransport, error) {
@@ -55,8 +53,9 @@ func NewTCP(ctx context.Context, logger log.ContextLogger, tag string, options o
 		serverAddr:       serverAddr,
 	}
 	if options.Reuse {
-		transport.access = new(sync.Mutex)
-		transport.connections = new(list.List[*reusableDNSConn])
+		transport.connections = expiringpool.New(ctx, C.TCPKeepAliveInterval, func(t *reusableDNSConn) {
+			_ = t.Close()
+		})
 	}
 	return transport, nil
 }
@@ -65,27 +64,23 @@ func (t *TCPTransport) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
+	if t.connections != nil {
+		t.connections.Start()
+	}
 	return dialer.InitializeDetour(t.dialer)
 }
 
 func (t *TCPTransport) Close() error {
-	if t.access == nil {
+	if t.connections == nil {
 		return nil
 	}
-	t.access.Lock()
-	defer t.access.Unlock()
-	for connection := t.connections.Front(); connection != nil; connection = connection.Next() {
-		_ = connection.Value.Close()
-	}
-	t.connections.Init()
+	t.connections.Close()
 	return nil
 }
 
 func (t *TCPTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
-	if t.access != nil {
-		t.access.Lock()
-		conn := t.connections.PopFront()
-		t.access.Unlock()
+	if t.connections != nil {
+		conn := t.connections.Get()
 		if conn != nil {
 			response, err := t.exchange(message, conn)
 			if err == nil {
@@ -112,10 +107,8 @@ func (t *TCPTransport) exchange(message *mDNS.Msg, conn *reusableDNSConn) (*mDNS
 		_ = conn.Close()
 		return nil, E.Cause(err, "read response")
 	}
-	if t.access != nil {
-		t.access.Lock()
-		t.connections.PushBack(conn)
-		t.access.Unlock()
+	if t.connections != nil {
+		t.connections.Put(conn)
 	}
 	return response, nil
 }
