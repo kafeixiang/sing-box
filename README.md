@@ -189,6 +189,27 @@ Add `spider_x` and update hard-coded Xray version.
 
 - `reuse`: Reuse TCP connection.
 
+## Route
+
+### Action
+
+#### reject
+
+```json
+{
+  "route": {
+    "rules": [
+      {
+        "action": "reject",
+        "focus_packet": true
+      }
+    ]
+  }
+}
+```
+
+- `focus_packet`: Do not reject UDP directly. Instead, continue receiving packet from it and drop.
+
 ## License
 
 ```

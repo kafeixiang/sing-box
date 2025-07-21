@@ -112,7 +112,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 			}
 		case *R.RuleActionReject:
 			buf.ReleaseMulti(buffers)
-			return action.Error(ctx)
+			return action.Error(ctx, false)
 		case *R.RuleActionHijackDNS:
 			for _, buffer := range buffers {
 				conn = bufio.NewCachedConn(conn, buffer)
@@ -227,7 +227,21 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 			}
 		case *R.RuleActionReject:
 			N.ReleaseMultiPacketBuffer(packetBuffers)
-			return action.Error(ctx)
+			err := action.Error(ctx, true)
+			if err != R.ErrFoucusPacket {
+				return err
+			}
+			go func() {
+				for {
+					buffer := buf.NewPacket()
+					_, err := conn.ReadPacket(buffer)
+					buffer.Release()
+					if err != nil {
+						break
+					}
+				}
+			}()
+			return nil
 		case *R.RuleActionHijackDNS:
 			return r.hijackDNSPacket(ctx, conn, packetBuffers, metadata, onClose)
 		}
@@ -270,7 +284,7 @@ func (r *Router) PreMatch(metadata adapter.InboundContext) error {
 	if !isReject {
 		return nil
 	}
-	return rejectAction.Error(context.Background())
+	return rejectAction.Error(context.Background(), strings.HasPrefix(metadata.Network, N.NetworkUDP))
 }
 
 func (r *Router) matchRule(

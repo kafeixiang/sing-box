@@ -261,6 +261,8 @@ func (d *DirectActionOptions) UnmarshalJSON(data []byte) error {
 type _RejectActionOptions struct {
 	Method string `json:"method,omitempty"`
 	NoDrop bool   `json:"no_drop,omitempty"`
+
+	FocusPacket bool `json:"focus_packet,omitempty"`
 }
 
 type RejectActionOptions _RejectActionOptions

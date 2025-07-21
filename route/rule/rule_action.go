@@ -82,6 +82,8 @@ func NewRuleAction(ctx context.Context, logger logger.ContextLogger, action opti
 			Method: action.RejectOptions.Method,
 			NoDrop: action.RejectOptions.NoDrop,
 			logger: logger,
+
+			focusPacket: action.RejectOptions.FocusPacket,
 		}, nil
 	case C.RuleActionTypeHijackDNS:
 		return &RuleActionHijackDNS{}, nil
@@ -302,12 +304,16 @@ func IsRejected(err error) bool {
 	return errors.As(err, &rejected)
 }
 
+var ErrFoucusPacket = E.New("focus packet")
+
 type RuleActionReject struct {
 	Method      string
 	NoDrop      bool
 	logger      logger.ContextLogger
 	dropAccess  sync.Mutex
 	dropCounter []time.Time
+
+	focusPacket bool
 }
 
 func (r *RuleActionReject) Type() string {
@@ -321,7 +327,10 @@ func (r *RuleActionReject) String() string {
 	return F.ToString("reject(", r.Method, ")")
 }
 
-func (r *RuleActionReject) Error(ctx context.Context) error {
+func (r *RuleActionReject) Error(ctx context.Context, isPacket bool) error {
+	if isPacket && r.focusPacket {
+		return ErrFoucusPacket
+	}
 	var returnErr error
 	switch r.Method {
 	case C.RuleActionRejectMethodDefault:
