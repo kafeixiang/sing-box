@@ -17,7 +17,7 @@ require (
 	github.com/libdns/cloudflare v0.2.2-0.20250430151523-b46a2b0885f6
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/metacubex/tfo-go v0.0.0-20241231083714-66613d49c422
-	github.com/metacubex/utls v1.7.3
+	github.com/metacubex/utls v1.8.0
 	github.com/mholt/acmez/v3 v3.1.2
 	github.com/miekg/dns v1.1.66
 	github.com/oschwald/maxminddb-golang v1.13.1
@@ -46,7 +46,6 @@ require (
 	go.uber.org/zap v1.27.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 	golang.org/x/crypto v0.38.0
-	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6
 	golang.org/x/mod v0.24.0
 	golang.org/x/net v0.40.0
 	golang.org/x/sync v0.14.0
@@ -126,6 +125,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
+	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
