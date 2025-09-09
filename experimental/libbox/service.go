@@ -27,6 +27,7 @@ import (
 	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 	"github.com/sagernet/sing/service/pause"
 )
 
@@ -43,6 +44,7 @@ type BoxService struct {
 
 func NewService(configContent string, platformInterface PlatformInterface) (*BoxService, error) {
 	ctx := BaseContext(platformInterface)
+	ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)
 	service.MustRegister[deprecated.Manager](ctx, new(deprecatedManager))
 	options, err := parseConfig(ctx, configContent)
 	if err != nil {
