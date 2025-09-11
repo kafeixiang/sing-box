@@ -361,7 +361,6 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, routeContext tun.Dire
 		return ping.NewDestinationWriter(routeDestination, newDestination), nil
 	}
 	return directRouteOutbound.NewDirectRouteConnection(metadata, routeContext, timeout)
-
 }
 
 func (r *Router) matchRule(
