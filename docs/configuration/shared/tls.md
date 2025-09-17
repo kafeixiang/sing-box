@@ -5,7 +5,13 @@ icon: material/new-box
 !!! quote "Changes in sing-box 1.13.0"
 
     :material-plus: [kernel_tx](#kernel_tx)  
-    :material-plus: [kernel_rx](#kernel_rx)
+    :material-plus: [kernel_rx](#kernel_rx)  
+    :material-plus: [curve_preferences](#curve_preferences)  
+    :material-plus: [certificate_sha256](#certificate_sha256)  
+    :material-plus: [client_authentication](#client_authentication)  
+    :material-plus: [client_certificate](#client_certificate)  
+    :material-plus: [client_certificate_path](#client_certificate_path)  
+    :material-plus: [client_certificate_sha256](#client_certificate_sha256)
 
 !!! quote "Changes in sing-box 1.12.0"
 
@@ -29,8 +35,13 @@ icon: material/new-box
   "min_version": "",
   "max_version": "",
   "cipher_suites": [],
+  "curve_preferences": [],
   "certificate": [],
   "certificate_path": "",
+  "client_authentication": "",
+  "client_certificate": [],
+  "client_certificate_path": [],
+  "client_certificate_sha256": [],
   "key": [],
   "key_path": "",
   "kernel_tx": false,
@@ -92,6 +103,7 @@ icon: material/new-box
   "cipher_suites": [],
   "certificate": "",
   "certificate_path": "",
+  "certificate_sha256": [],
   "fragment": false,
   "fragment_fallback_delay": "",
   "record_fragment": false,
@@ -195,14 +207,29 @@ By default, the maximum version is currently TLS 1.3.
 
 #### cipher_suites
 
-A list of enabled TLS 1.0–1.2 cipher suites. The order of the list is ignored.
+List of enabled TLS 1.0–1.2 cipher suites. The order of the list is ignored.
 Note that TLS 1.3 cipher suites are not configurable.
 
 If empty, a safe default list is used. The default cipher suites might change over time.
 
+#### curve_preferences
+
+!!! question "Since sing-box 1.13.0"
+
+Set of supported key exchange mechanisms. The order of the list is ignored, and key exchange mechanisms are chosen
+from this list using an internal preference order by Golang.
+
+Available values, also the default list:
+
+* `P256`
+* `P384`
+* `P521`
+* `X25519`
+* `X25519MLKEM768`
+
 #### certificate
 
-The server certificate line array, in PEM format.
+Server certificates chain line array, in PEM format.
 
 #### certificate_path
 
@@ -210,7 +237,16 @@ The server certificate line array, in PEM format.
 
     Will be automatically reloaded if file modified.
 
-The path to the server certificate, in PEM format.
+The path to server certificate chain, in PEM format.
+
+
+#### certificate_sha256
+
+!!! question "Since sing-box 1.13.0"
+
+==Client only==
+
+List of SHA-256 hashes of server certificate chain, in base64 format.
 
 #### key
 
@@ -227,6 +263,53 @@ The server private key line array, in PEM format.
     Will be automatically reloaded if file modified.
 
 The path to the server private key, in PEM format.
+
+#### client_authentication
+
+!!! question "Since sing-box 1.13.0"
+
+==Server only==
+
+The type of client authentication to use.
+
+Available values:
+
+* `no` (default)
+* `request`
+* `require-any`
+* `verify-if-given`
+* `require-and-verify`
+
+One of `client_certificate`, `client_certificate_path`, or `client_certificate_sha256` is required
+if this option is set to `verify-if-given`, or `require-and-verify`.
+
+#### client_certificate
+
+!!! question "Since sing-box 1.13.0"
+
+==Server only==
+
+Client certificate chain line array, in PEM format.
+
+#### client_certificate_path
+
+!!! question "Since sing-box 1.13.0"
+
+==Server only==
+
+!!! note ""
+
+    Will be automatically reloaded if file modified.
+
+List of path to client certificate chain, in PEM format.
+
+#### client_certificate_sha256
+
+!!! question "Since sing-box 1.13.0"
+
+==Server only==
+
+List of SHA-256 hashes of client certificate chain, in base64 format.
 
 #### kernel_tx
 
