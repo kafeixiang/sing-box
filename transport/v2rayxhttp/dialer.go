@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/sagernet/quic-go/http3"
+	"github.com/sagernet/sing-box/common/vision"
 	common "github.com/sagernet/sing-box/common/xray"
 	"github.com/sagernet/sing-box/common/xray/buf"
 	"github.com/sagernet/sing-box/option"
@@ -154,6 +155,9 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessio
 	}
 	remoteAddr = res.remoteAddr
 	localAddr = res.localAddr
+	if hook, ok := vision.HookFromContext(ctx); ok {
+		hook(res.conn)
+	}
 	return
 }
 
