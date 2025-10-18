@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/vision"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
