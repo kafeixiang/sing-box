@@ -34,6 +34,7 @@ type _V2RayTransportOptions struct {
 	GRPCOptions        V2RayGRPCOptions        `json:"-"`
 	HTTPUpgradeOptions V2RayHTTPUpgradeOptions `json:"-"`
 	XHTTPOptions       V2RayXHTTPOptions       `json:"-"`
+	KCPOptions         V2RayKCPOptions         `json:"-"`
 }
 
 type V2RayTransportOptions _V2RayTransportOptions
@@ -53,6 +54,8 @@ func (o V2RayTransportOptions) MarshalJSON() ([]byte, error) {
 		v = o.HTTPUpgradeOptions
 	case C.V2RayTransportTypeXHTTP:
 		v = o.XHTTPOptions
+	case C.V2RayTransportTypeKCP:
+		v = o.KCPOptions
 	case "":
 		return nil, E.New("missing transport type")
 	default:
@@ -80,6 +83,8 @@ func (o *V2RayTransportOptions) UnmarshalJSON(bytes []byte) error {
 		v = &o.HTTPUpgradeOptions
 	case C.V2RayTransportTypeXHTTP:
 		v = &o.XHTTPOptions
+	case C.V2RayTransportTypeKCP:
+		v = &o.KCPOptions
 	default:
 		return E.New("unknown transport type: " + o.Type)
 	}
@@ -513,4 +518,79 @@ func (m *V2RayXHTTPXmuxOptions) GetNormalizedHMaxReusableSecs() Xbadoption.Range
 		return Xbadoption.Range{From: 1800, To: 3000}
 	}
 	return m.HMaxReusableSecs
+}
+
+type V2RayKCPOptions struct {
+	MTU              uint32 `json:"mtu,omitempty"`
+	TTI              uint32 `json:"tti,omitempty"`
+	UplinkCapacity   uint32 `json:"uplink_capacity,omitempty"`
+	DownlinkCapacity uint32 `json:"downlink_capacity,omitempty"`
+	Congestion       bool   `json:"congestion,omitempty"`
+	ReadBufferSize   uint32 `json:"read_buffer_size,omitempty"`
+	WriteBufferSize  uint32 `json:"write_buffer_size,omitempty"`
+	HeaderType       string `json:"header_type,omitempty"`
+	Seed             string `json:"seed,omitempty"`
+	CwndMultiplier   uint32 `json:"cwnd_multiplier,omitempty"`
+	MaxSendingWindow uint32 `json:"max_sending_window,omitempty"`
+}
+
+func (k *V2RayKCPOptions) GetMTU() uint32 {
+	if k.MTU == 0 {
+		return 1350
+	}
+	return k.MTU
+}
+
+func (k *V2RayKCPOptions) GetTTI() uint32 {
+	if k.TTI == 0 {
+		return 50
+	}
+	// Valid range: 10-5000 (extended from 10-100 to support high-latency networks)
+	return k.TTI
+}
+
+func (k *V2RayKCPOptions) GetUplinkCapacity() uint32 {
+	if k.UplinkCapacity == 0 {
+		return 12
+	}
+	return k.UplinkCapacity
+}
+
+func (k *V2RayKCPOptions) GetDownlinkCapacity() uint32 {
+	if k.DownlinkCapacity == 0 {
+		return 100
+	}
+	return k.DownlinkCapacity
+}
+
+func (k *V2RayKCPOptions) GetReadBufferSize() uint32 {
+	if k.ReadBufferSize == 0 {
+		return 1
+	}
+	return k.ReadBufferSize
+}
+
+func (k *V2RayKCPOptions) GetWriteBufferSize() uint32 {
+	if k.WriteBufferSize == 0 {
+		return 1
+	}
+	return k.WriteBufferSize
+}
+
+func (k *V2RayKCPOptions) GetHeaderType() string {
+	if k.HeaderType == "" {
+		return "none"
+	}
+	return k.HeaderType
+}
+
+func (k *V2RayKCPOptions) GetCwndMultiplier() uint32 {
+	if k.CwndMultiplier == 0 {
+		return 20
+	}
+	return k.CwndMultiplier
+}
+
+func (k *V2RayKCPOptions) GetMaxSendingWindow() uint32 {
+	return k.MaxSendingWindow
 }
