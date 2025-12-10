@@ -316,7 +316,7 @@ jobs:
           path: "dist"
   build_darwin:
     name: Build Darwin binaries
-    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
+    if: false  # TODO: temporarily disabled for testing
     runs-on: macos-latest
     needs:
       - calculate_version
@@ -390,7 +390,7 @@ jobs:
           path: "dist"
   build_windows:
     name: Build Windows binaries
-    if: false  # TODO: temporarily disabled for testing
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
     runs-on: windows-latest
     needs:
       - calculate_version
@@ -416,12 +416,11 @@ jobs:
       - name: Build
         run: |
           mkdir -p dist
-          go build -v -trimpath -o dist/sing-box.exe -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_naive_outbound,badlinkname,tfogo_checklinkname0" `
+          go build -v -trimpath -o dist/sing-box.exe -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_naive_outbound,with_purego,badlinkname,tfogo_checklinkname0" `
           -ldflags "-s -buildid= -X github.com/sagernet/sing-box/constant.Version=${{ needs.calculate_version.outputs.version }} -checklinkname=0" `
           ./cmd/sing-box
         env:
-          CGO_ENABLED: "1"
-          CGO_LDFLAGS_ALLOW: ".*"
+          CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: ${{ matrix.arch }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
