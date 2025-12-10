@@ -316,7 +316,7 @@ jobs:
           path: "dist"
   build_darwin:
     name: Build Darwin binaries
-    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
+    if: false  # TODO: temporarily disabled for testing
     runs-on: macos-latest
     needs:
       - calculate_version
@@ -390,7 +390,7 @@ jobs:
           path: "dist"
   build_windows:
     name: Build Windows binaries
-    if: false  # TODO: temporarily disabled for testing
+    if: github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Binary'
     runs-on: windows-latest
     needs:
       - calculate_version
