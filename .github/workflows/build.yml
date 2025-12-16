@@ -69,11 +69,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: linux, arch: amd64, variant: purego, openwrt: "x86_64" }
+          - { os: linux, arch: amd64, variant: purego, naive: true, openwrt: "x86_64" }
           - { os: linux, arch: amd64, variant: glibc, naive: true }
           - { os: linux, arch: amd64, variant: musl, naive: true, debian: amd64, rpm: x86_64, pacman: x86_64, openwrt: "x86_64" }
 
-          - { os: linux, arch: arm64, variant: purego, openwrt: "aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 aarch64_generic" }
+          - { os: linux, arch: arm64, variant: purego, naive: true, openwrt: "aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 aarch64_generic" }
           - { os: linux, arch: arm64, variant: glibc, naive: true }
           - { os: linux, arch: arm64, variant: musl, naive: true, debian: arm64, rpm: aarch64, pacman: aarch64, openwrt: "aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 aarch64_generic" }
 
