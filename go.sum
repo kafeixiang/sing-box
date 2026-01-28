@@ -262,8 +262,8 @@ github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a h1:ObwtHN2VpqE0ZN
 github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a/go.mod h1:xLnfdiJbSp8rNqYEdIW/6eDO4mVoogml14Bh2hSiFpM=
 github.com/sagernet/nftables v0.3.0-mod.2 h1:ck2KMU02OxL1eDFgGaWYglMDpoOZ7OHzxje+vW5Q0OQ=
 github.com/sagernet/nftables v0.3.0-mod.2/go.mod h1:8kslHG4VvYNihcco+i6uxIX7qbT8A56T0y5q7U44ZaQ=
-github.com/sagernet/quic-go v0.59.0-sing-box-mod.4 h1:6qvrUW79S+CrPwWz6cMePXohgjHoKxLo3c+MDhNwc3o=
-github.com/sagernet/quic-go v0.59.0-sing-box-mod.4/go.mod h1:OqILvS182CyOol5zNNo6bguvOGgXzV459+chpRaUC+4=
+github.com/sagernet/quic-go v0.59.0-sing-box-mod.5 h1:73oI/46ckKWtPYtke10oR2T0xqdPhqJzKxMwUjyTG30=
+github.com/sagernet/quic-go v0.59.0-sing-box-mod.5/go.mod h1:OqILvS182CyOol5zNNo6bguvOGgXzV459+chpRaUC+4=
 github.com/sagernet/sing v0.8.12-0.20260625092856-31bbf21d4b12 h1:jazHnJnTFW35dz1HjuwlQdJSvQBs7V2gVHI4x1IsWHk=
 github.com/sagernet/sing v0.8.12-0.20260625092856-31bbf21d4b12/go.mod h1:olXxWQNqRW/l2Q6JI3b2Qmz8iQnIFlOeeH8bx6JhgUA=
 github.com/sagernet/sing-cloudflared v0.1.1 h1:By29ZWMJl8QU6UcC5pmBv803rYigAoSmzhDFOZc3h18=
@@ -331,6 +331,8 @@ github.com/vishvananda/netns v0.0.5 h1:DfiHV+j8bA32MFM7bfEunvT8IAqQ/NzSJHtcmW5zd
 github.com/vishvananda/netns v0.0.5/go.mod h1:SpkAiCQRtJ6TvvxPnOSyH3BMl6unz3xZlaprSwhNNJM=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
+github.com/xchacha20-poly1305/sing-trusttunnel v0.2.3 h1:lEV5wf8b/7LSq/zGldXBCkbYAGSme5vpmQQwSh3t994=
+github.com/xchacha20-poly1305/sing-trusttunnel v0.2.3/go.mod h1:ekbygU19X0rL8AYsCSzo9gnfT4dSt/bgvtv/hwbmfBY=
 github.com/xchacha20-poly1305/sing-vmess v0.2.7-0.20260629122840-20d7b04cd12c h1:OqWL0Tdhi+rg9fiqopq8AZk2v6mtiNs4wcL+SRzsnRs=
 github.com/xchacha20-poly1305/sing-vmess v0.2.7-0.20260629122840-20d7b04cd12c/go.mod h1:J9KdaudLrphXQtyp/lnb/8hhmjM0DZ++FU91HhcDZUM=
 github.com/zeebo/assert v1.1.0 h1:hU1L1vLTHsnO8x8c9KAR5GmM5QscxHg5RNU5z5qbUWY=
