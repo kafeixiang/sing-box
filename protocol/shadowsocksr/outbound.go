@@ -25,6 +25,9 @@ import (
 	"github.com/metacubex/mihomo/transport/socks5"
 	"github.com/metacubex/mihomo/transport/ssr/obfs"
 	"github.com/metacubex/mihomo/transport/ssr/protocol"
+
+	shadowsocksM "github.com/metacubex/sing-shadowsocks2"
+	shadowstreamM "github.com/metacubex/sing-shadowsocks2/shadowstream"
 )
 
 func RegisterOutbound(registry *outbound.Registry) {
@@ -59,10 +62,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	default:
 		cipher = options.Method
 	}
-	outbound.cipher, err = core.PickCipher(cipher, nil, options.Password)
+
+	method, err := shadowsocksM.CreateMethod(ctx, options.Method, shadowsocksM.MethodOptions{Password: options.Password})
 	if err != nil {
 		return nil, err
 	}
+	pickCipher, ok := method.(core.Cipher)
+	if !ok {
+		return nil, fmt.Errorf("ssr does not support AEAD encryption methods")
+	}
+	outbound.cipher = pickCipher
+
 	var (
 		ivSize int
 		key    []byte
@@ -71,12 +81,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		ivSize = 0
 		key = core.Kdf(options.Password, 16)
 	} else {
-		streamCipher, ok := outbound.cipher.(*core.StreamCipher)
+		streamCipher, ok := outbound.cipher.(*shadowstreamM.Method)
 		if !ok {
 			return nil, fmt.Errorf("%s is not none or a supported stream cipher in ssr", cipher)
 		}
 		ivSize = streamCipher.IVSize()
-		key = streamCipher.Key
+		key = streamCipher.Key()
 	}
 	obfs, obfsOverhead, err := obfs.PickObfs(options.Obfs, &obfs.Base{
 		Host:   options.Server,
