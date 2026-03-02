@@ -21,9 +21,14 @@ type PlatformInterface interface {
 	SystemCertificates() StringIterator
 	ClearDNSCache()
 	SendNotification(notification *Notification) error
+	// NekoBox 要求的额外接口
+	WriteLog(message string)
+	PackageNameByUid(uid int32) string
+	UidByPackageName(packageName string) int32
 }
 
 type ConnectionOwner struct {
+	ProcessID          int32
 	UserId             int32
 	UserName           string
 	ProcessPath        string

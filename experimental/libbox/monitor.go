@@ -22,10 +22,16 @@ type platformDefaultInterfaceMonitor struct {
 }
 
 func (m *platformDefaultInterfaceMonitor) Start() error {
+	if m.isTest {
+		return m.networkManager.UpdateInterfaces()
+	}
 	return m.iif.StartDefaultInterfaceMonitor(m)
 }
 
 func (m *platformDefaultInterfaceMonitor) Close() error {
+	if m.isTest {
+		return nil
+	}
 	return m.iif.CloseDefaultInterfaceMonitor(m)
 }
 

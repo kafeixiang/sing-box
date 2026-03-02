@@ -63,7 +63,17 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context, logFactory log.ObservableFactory, options option.ClashAPIOptions) (adapter.ClashServer, error) {
-	trafficManager := trafficontrol.NewManager()
+	outbounds := service.FromContext[adapter.OutboundManager](ctx).Outbounds()
+	outStr := make([]string, len(outbounds))
+	for i, out := range outbounds {
+		outStr[i] = out.Tag()
+	}
+	endpoints := service.FromContext[adapter.EndpointManager](ctx).Endpoints()
+	endStr := make([]string, len(endpoints))
+	for i, end := range endpoints {
+		endStr[i] = end.Tag()
+	}
+	trafficManager := trafficontrol.NewManager(outStr, endStr)
 	chiRouter := chi.NewRouter()
 	s := &Server{
 		ctx:       ctx,

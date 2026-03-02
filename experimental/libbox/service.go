@@ -33,6 +33,7 @@ type platformInterfaceWrapper struct {
 	defaultInterface       *control.Interface
 	isExpensive            bool
 	isConstrained          bool
+	isTest                 bool
 }
 
 func (w *platformInterfaceWrapper) Initialize(networkManager adapter.NetworkManager) error {
@@ -200,7 +201,11 @@ func (w *platformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConn
 	if err != nil {
 		return nil, err
 	}
+	if result == nil {
+		return nil, nil
+	}
 	return &adapter.ConnectionOwner{
+		ProcessID:          uint32(result.ProcessID),
 		UserId:             result.UserId,
 		UserName:           result.UserName,
 		ProcessPath:        result.ProcessPath,
@@ -218,6 +223,24 @@ func (w *platformInterfaceWrapper) UsePlatformNotification() bool {
 
 func (w *platformInterfaceWrapper) SendNotification(notification *adapter.Notification) error {
 	return w.iif.SendNotification((*Notification)(notification))
+}
+
+func (w *platformInterfaceWrapper) WriteMessage(level uint8, message string) {
+	if NekoLogWriter != nil {
+		NekoLogWriter.WriteMessage(level, message)
+	}
+}
+
+func (w *platformInterfaceWrapper) WriteLog(message string) {
+	w.iif.WriteLog(message)
+}
+
+func (w *platformInterfaceWrapper) PackageNameByUid(uid int32) string {
+	return w.iif.PackageNameByUid(uid)
+}
+
+func (w *platformInterfaceWrapper) UidByPackageName(packageName string) int32 {
+	return w.iif.UidByPackageName(packageName)
 }
 
 func AvailablePort(startPort int32) (int32, error) {
