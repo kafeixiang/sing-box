@@ -33,7 +33,7 @@ func baseContext(platformInterface PlatformInterface) context.Context {
 	}
 	ctx := context.Background()
 	ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)
-	return box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry())
+	return box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry(), include.CertificateProviderRegistry())
 }
 
 func parseConfig(ctx context.Context, configContent string) (option.Options, error) {
@@ -141,6 +141,18 @@ func (s *platformInterfaceStub) UsePlatformNotification() bool {
 }
 
 func (s *platformInterfaceStub) SendNotification(notification *adapter.Notification) error {
+	return nil
+}
+
+func (s *platformInterfaceStub) UsePlatformNeighborResolver() bool {
+	return false
+}
+
+func (s *platformInterfaceStub) StartNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) CloseNeighborMonitor(listener adapter.NeighborUpdateListener) error {
 	return nil
 }
 
