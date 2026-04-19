@@ -2,6 +2,20 @@
 
 set -e -o pipefail
 
+normalize_root_ownership() {
+  # apk mkpkg records the staging tree owner/group in package metadata.
+  if [ "$(id -u)" -eq 0 ]; then
+    chown -R 0:0 "$ROOT_DIR"
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R 0:0 "$ROOT_DIR"
+    return
+  fi
+  echo "APK packaging requires root-owned staging files for correct package ownership metadata." >&2
+  exit 1
+}
+
 ARCHITECTURE="$1"
 VERSION="$2"
 BINARY_PATH="$3"
@@ -62,6 +76,8 @@ done < "$PACKAGES_DIR/.conffiles" > "$PACKAGES_DIR/.conffiles_static"
   | sed 's|^\./|/|' \
   | grep -v '^/lib/apk/packages/' \
   | sort > "$PACKAGES_DIR/.list"
+
+normalize_root_ownership
 
 # Build APK
 apk mkpkg \
