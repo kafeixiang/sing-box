@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/sagernet/sing/common/json"
-	"github.com/sagernet/ws"
-	"github.com/sagernet/ws/wsutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
+	"github.com/gobwas/ws"
+	"github.com/gobwas/ws/wsutil"
 )
 
 // API created by Clash.Meta
