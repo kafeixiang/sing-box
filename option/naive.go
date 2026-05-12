@@ -22,6 +22,11 @@ type NaiveInboundOptions struct {
 	Network               NetworkList `json:"network,omitempty"`
 	QUICCongestionControl string      `json:"quic_congestion_control,omitempty"`
 	InboundTLSOptionsContainer
+
+	TolerateUnpadding bool `json:"tolerate_unpadding,omitempty"`
+
+	FallbackURL        string             `json:"fallback_url,omitempty"`
+	FallbackHTTPClient *HTTPClientOptions `json:"fallback_http_client,omitempty"`
 }
 
 type NaiveOutboundOptions struct {
