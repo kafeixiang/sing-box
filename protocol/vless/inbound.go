@@ -168,14 +168,10 @@ func (h *Inbound) Close() error {
 }
 
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
-	canSplice := h.transport == nil
-	if canSplice && h.decryption != nil && h.decryption.IsFullRandomXorMode() {
-		canSplice = false
-	}
-	h.newConnectionInternal(ctx, conn, metadata, onClose, canSplice)
+	h.newConnectionInternal(ctx, conn, metadata, onClose)
 }
 
-func (h *Inbound) newConnectionInternal(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc, canSplice bool) {
+func (h *Inbound) newConnectionInternal(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if h.tlsConfig != nil && h.transport == nil {
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
 		if err != nil {
@@ -195,7 +191,7 @@ func (h *Inbound) newConnectionInternal(ctx context.Context, conn net.Conn, meta
 		}
 		conn = encConn
 	}
-	err := h.service.NewConnectionWithOptions(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose, canSplice)
+	err := h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
@@ -340,5 +336,5 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
-	(*Inbound)(h).newConnectionInternal(ctx, conn, metadata, onClose, false)
+	(*Inbound)(h).newConnectionInternal(ctx, conn, metadata, onClose)
 }
