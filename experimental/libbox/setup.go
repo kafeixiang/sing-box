@@ -5,14 +5,10 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/sagernet/sing-box/common/humanize"
 	C "github.com/sagernet/sing-box/constant"
-<<<<<<< HEAD
 	"github.com/sagernet/sing-box/experimental/locale"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common/byteformats"
-=======
->>>>>>> 12dd1ac8 (Improve conntrack)
 )
 
 var (
