@@ -1,0 +1,37 @@
+name: JSON Schema
+
+on:
+  push:
+    branches:
+      - junk
+    paths:
+      - 'option/**'
+      - 'constant/**'
+      - 'adapter/**'
+      - 'dns/**'
+      - 'include/**'
+      - 'protocol/**'
+      - 'provider/**'
+      - 'service/**'
+      - 'cmd/internal/generate_json_schema/**'
+      - 'docs/configuration/schema.json'
+      - 'Makefile'
+      - '.github/workflows/json-schema.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  json-schema:
+    name: Generate JSON schema
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ^1.25
+      - name: Check JSON schema
+        run: make check_json_schema
