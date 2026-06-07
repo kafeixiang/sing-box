@@ -379,15 +379,29 @@ func (d *DefaultDialer) WireGuardControl() control.Func {
 }
 
 func (d *DefaultDialer) trackConn(conn net.Conn, err error) (net.Conn, error) {
-	if d.connectionManager == nil || err != nil {
-		return conn, err
+	if err != nil {
+		return nil, err
+	}
+	conn, err = conntrack.NewConn(conn)
+	if err != nil {
+		return nil, err
+	}
+	if d.connectionManager == nil {
+		return conn, nil
 	}
 	return d.connectionManager.TrackConn(conn), nil
 }
 
 func (d *DefaultDialer) trackPacketConn(conn net.PacketConn, err error) (net.PacketConn, error) {
-	if d.connectionManager == nil || err != nil {
-		return conn, err
+	if err != nil {
+		return nil, err
+	}
+	conn, err = conntrack.NewPacketConn(conn)
+	if err != nil {
+		return nil, err
+	}
+	if d.connectionManager == nil {
+		return conn, nil
 	}
 	return d.connectionManager.TrackPacketConn(conn), nil
 }
