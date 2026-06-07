@@ -176,7 +176,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.7-mod.9
+replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.8-mod.1
 
 replace github.com/sagernet/gvisor => github.com/sagernet/gvisor v0.0.0-20250811.0-sing-box-mod.1
 
