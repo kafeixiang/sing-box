@@ -41,7 +41,6 @@ import (
 	"github.com/sagernet/sing-box/protocol/vmess"
 	providerLocal "github.com/sagernet/sing-box/provider/local"
 	"github.com/sagernet/sing-box/provider/remote"
-	"github.com/sagernet/sing-box/service/api"
 	originca "github.com/sagernet/sing-box/service/origin_ca"
 	"github.com/sagernet/sing-box/service/resolved"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -155,7 +154,7 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 func ServiceRegistry() *service.Registry {
 	registry := service.NewRegistry()
 
-	api.RegisterService(registry)
+	registerAPI(registry)
 	resolved.RegisterService(registry)
 	// ssmapi.RegisterService(registry)
 
