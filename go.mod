@@ -77,7 +77,7 @@ require (
 	howett.net/plist v1.0.1
 )
 
-replace github.com/sagernet/sing-tun => github.com/reF1nd/sing-tun v0.8.12-0.20260629130051-22263d0339b9
+replace github.com/sagernet/sing-tun => github.com/xchacha20-poly1305/sing-tun v0.8.11-0.20260630020013-fa4f6ce1db8a
 
 replace github.com/sagernet/sing-vmess => github.com/xchacha20-poly1305/sing-vmess v0.2.7-0.20260629122840-20d7b04cd12c
 
