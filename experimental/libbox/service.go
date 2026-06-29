@@ -1,18 +1,25 @@
 package libbox
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"runtime"
+	runtimeDebug "runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/experimental/libbox/internal/procfs"
 	"github.com/sagernet/sing-box/option"
 	tun "github.com/sagernet/sing-tun"
@@ -20,7 +27,91 @@ import (
 	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/pause"
 )
+
+type BoxService struct {
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	urlTestHistoryStorage adapter.URLTestHistoryStorage
+	instance              *box.Box
+	clashServer           adapter.ClashServer
+	pauseManager          pause.Manager
+}
+
+func NewService(configContent string, platformInterface PlatformInterface) (*BoxService, error) {
+	ctx := baseContext(platformInterface)
+	service.MustRegister[deprecated.Manager](ctx, new(deprecatedManager))
+	options, err := parseConfig(ctx, configContent)
+	if err != nil {
+		return nil, err
+	}
+	runtimeDebug.FreeOSMemory()
+	ctx, cancel := context.WithCancel(ctx)
+	urlTestHistoryStorage := urltest.NewHistoryStorage()
+	ctx = service.ContextWithPtr(ctx, urlTestHistoryStorage)
+	platformWrapper := &platformInterfaceWrapper{
+		iif:       platformInterface,
+		useProcFS: platformInterface.UseProcFS(),
+	}
+	service.MustRegister[adapter.PlatformInterface](ctx, platformWrapper)
+	instance, err := box.New(box.Options{
+		Context:           ctx,
+		Options:           options,
+		PlatformLogWriter: platformWrapper,
+	})
+	if err != nil {
+		cancel()
+		return nil, E.Cause(err, "create service")
+	}
+	runtimeDebug.FreeOSMemory()
+	return &BoxService{
+		ctx:                   ctx,
+		cancel:                cancel,
+		instance:              instance,
+		urlTestHistoryStorage: urlTestHistoryStorage,
+		pauseManager:          service.FromContext[pause.Manager](ctx),
+		clashServer:           service.FromContext[adapter.ClashServer](ctx),
+	}, nil
+}
+
+func (s *BoxService) Start() error {
+	if sFixAndroidStack {
+		var err error
+		done := make(chan struct{})
+		go func() {
+			err = s.instance.Start()
+			close(done)
+		}()
+		<-done
+		return err
+	} else {
+		return s.instance.Start()
+	}
+}
+
+func (s *BoxService) Close() error {
+	s.cancel()
+	s.urlTestHistoryStorage.Close()
+	var err error
+	done := make(chan struct{})
+	go func() {
+		err = s.instance.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return err
+	case <-time.After(C.FatalStopTimeout):
+		os.Exit(1)
+		return nil
+	}
+}
+
+func (s *BoxService) NeedWIFIState() bool {
+	return s.instance.Router().NeedWIFIState()
+}
 
 var _ adapter.PlatformInterface = (*platformInterfaceWrapper)(nil)
 
@@ -84,6 +175,10 @@ func (w *platformInterfaceWrapper) OpenInterface(options *tun.Options, platformO
 	return tun.New(*options)
 }
 
+func (w *platformInterfaceWrapper) WriteMessage(level logger.Level, message string) {
+	w.iif.WriteLog(message)
+}
+
 func myTunAddress(options *tun.Options) []netip.Addr {
 	addresses := make([]netip.Addr, 0, len(options.Inet4Address)+len(options.Inet6Address))
 	for _, prefix := range options.Inet4Address {
@@ -121,11 +216,14 @@ func (w *platformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterfa
 	}
 	var interfaces []adapter.NetworkInterface
 	for _, netInterface := range iteratorToArray[*NetworkInterface](interfaceIterator) {
+		if netInterface.Name == w.myTunName {
+			continue
+		}
 		w.defaultInterfaceAccess.Lock()
 		// (GOOS=windows) SA4006: this value of `isDefault` is never used
 		// Why not used?
 		//nolint:staticcheck
-		isDefault := netInterface.Name != w.myTunName && w.defaultInterface != nil && int(netInterface.Index) == w.defaultInterface.Index
+		isDefault := w.defaultInterface != nil && int(netInterface.Index) == w.defaultInterface.Index
 		w.defaultInterfaceAccess.Unlock()
 		interfaces = append(interfaces, adapter.NetworkInterface{
 			Interface: control.Interface{
@@ -175,6 +273,10 @@ func (w *platformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
 	return (adapter.WIFIState)(*wifiState)
 }
 
+func (w *platformInterfaceWrapper) SystemCertificates() []string {
+	return iteratorToArray[string](w.iif.SystemCertificates())
+}
+
 func (w *platformInterfaceWrapper) UsePlatformConnectionOwnerFinder() bool {
 	return true
 }
@@ -202,20 +304,21 @@ func (w *platformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConn
 		if uid == -1 {
 			return nil, E.New("procfs: not found")
 		}
+		packageName, _ := w.iif.PackageNameByUid(uid)
 		return &adapter.ConnectionOwner{
-			UserId: uid,
+			UserId:              uid,
+			AndroidPackageNames: []string{packageName},
 		}, nil
 	}
 
-	result, err := w.iif.FindConnectionOwner(request.IpProtocol, request.SourceAddress, request.SourcePort, request.DestinationAddress, request.DestinationPort)
+	uid, err := w.iif.FindConnectionOwner(request.IpProtocol, request.SourceAddress, request.SourcePort, request.DestinationAddress, request.DestinationPort)
 	if err != nil {
 		return nil, err
 	}
+	packageName, _ := w.iif.PackageNameByUid(uid)
 	return &adapter.ConnectionOwner{
-		UserId:              result.UserId,
-		UserName:            result.UserName,
-		ProcessPath:         result.ProcessPath,
-		AndroidPackageNames: result.androidPackageNames,
+		UserId:              uid,
+		AndroidPackageNames: []string{packageName},
 	}, nil
 }
 
