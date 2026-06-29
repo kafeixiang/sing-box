@@ -11,7 +11,24 @@ import (
 type (
 	ConnectionHandlerFunc       = func(ctx context.Context, conn net.Conn, metadata InboundContext, onClose N.CloseHandlerFunc)
 	PacketConnectionHandlerFunc = func(ctx context.Context, conn N.PacketConn, metadata InboundContext, onClose N.CloseHandlerFunc)
+	ConnectionHandlerFuncEx       = ConnectionHandlerFunc
+	PacketConnectionHandlerFuncEx = PacketConnectionHandlerFunc
 )
+
+func NewUpstreamHandlerEx(
+	metadata InboundContext,
+	connectionHandler ConnectionHandlerFuncEx,
+	packetHandler PacketConnectionHandlerFuncEx,
+) UpstreamHandlerAdapter {
+	return NewUpstreamHandler(metadata, connectionHandler, packetHandler)
+}
+
+func NewUpstreamContextHandlerEx(
+	connectionHandler ConnectionHandlerFuncEx,
+	packetHandler PacketConnectionHandlerFuncEx,
+) UpstreamHandlerAdapter {
+	return NewUpstreamContextHandler(connectionHandler, packetHandler)
+}
 
 func NewUpstreamHandler(
 	metadata InboundContext,
