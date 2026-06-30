@@ -12,6 +12,7 @@ import (
 type InboundTLSOptions struct {
 	Enabled                          bool                                `json:"enabled,omitempty"`
 	ServerName                       string                              `json:"server_name,omitempty"`
+	ServerNames                      badoption.Listable[string]          `json:"server_names,omitempty"`
 	Insecure                         bool                                `json:"insecure,omitempty"`
 	ALPN                             badoption.Listable[string]          `json:"alpn,omitempty"`
 	MinVersion                       string                              `json:"min_version,omitempty"`
@@ -36,6 +37,8 @@ type InboundTLSOptions struct {
 
 	ECH     *InboundECHOptions     `json:"ech,omitempty"`
 	Reality *InboundRealityOptions `json:"reality,omitempty"`
+
+	RejectUnknownSNI bool `json:"reject_unknown_sni,omitempty"`
 }
 
 type ClientAuthType tls.ClientAuthType
@@ -117,6 +120,7 @@ type OutboundTLSOptions struct {
 	ClientCertificatePath      string                              `json:"client_certificate_path,omitempty"`
 	ClientKey                  badoption.Listable[string]          `json:"client_key,omitempty"`
 	ClientKeyPath              string                              `json:"client_key_path,omitempty"`
+	CertificatePinSHA256       string                              `json:"certificate_pin_sha256,omitempty"`
 	Fragment                   bool                                `json:"fragment,omitempty"`
 	FragmentFallbackDelay      badoption.Duration                  `json:"fragment_fallback_delay,omitempty"`
 	RecordFragment             bool                                `json:"record_fragment,omitempty"`

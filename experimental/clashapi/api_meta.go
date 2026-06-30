@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/sagernet/sing/common/json"
-	"github.com/sagernet/ws"
-	"github.com/sagernet/ws/wsutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
+	"github.com/gobwas/ws"
+	"github.com/gobwas/ws/wsutil"
 )
 
 // API created by Clash.Meta
@@ -31,6 +31,7 @@ func (s *Server) setupMetaAPI(r chi.Router) {
 	r.Get("/memory", memory(s.ctx))
 	r.Mount("/group", groupRouter(s))
 	r.Mount("/upgrade", upgradeRouter(s))
+	r.Mount("/storage", storageRouter(s.ctx))
 }
 
 type Memory struct {

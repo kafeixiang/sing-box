@@ -2,6 +2,7 @@ package option
 
 import (
 	"context"
+	"net/http"
 	"net/netip"
 
 	C "github.com/sagernet/sing-box/constant"
@@ -14,10 +15,11 @@ import (
 )
 
 type RawDNSOptions struct {
-	Servers        []DNSServerOptions `json:"servers,omitempty"`
-	Rules          []DNSRule          `json:"rules,omitempty"`
-	Final          string             `json:"final,omitempty"`
-	ReverseMapping bool               `json:"reverse_mapping,omitempty"`
+	Servers            []DNSServerOptions `json:"servers,omitempty"`
+	Rules              []DNSRule          `json:"rules,omitempty"`
+	Final              string             `json:"final,omitempty"`
+	ReverseMapping     bool               `json:"reverse_mapping,omitempty"`
+	DefaultRejectRcode *DNSRejectRCode    `json:"default_reject_rcode,omitempty"`
 	DNSClientOptions
 }
 
@@ -52,7 +54,10 @@ type DNSClientOptions struct {
 	DisableCache     bool                  `json:"disable_cache,omitempty"`
 	DisableExpire    bool                  `json:"disable_expire,omitempty"`
 	IndependentCache bool                  `json:"independent_cache,omitempty"`
+	RoundRobinCache  bool                  `json:"round_robin_cache,omitempty"`
 	CacheCapacity    uint32                `json:"cache_capacity,omitempty"`
+	MinCacheTTL      uint32                `json:"min_cache_ttl,omitempty"`
+	MaxCacheTTL      uint32                `json:"max_cache_ttl,omitempty"`
 	Optimistic       *OptimisticDNSOptions `json:"optimistic,omitempty"`
 	ClientSubnet     *badoption.Prefixable `json:"client_subnet,omitempty"`
 }
@@ -143,9 +148,47 @@ func (o *DNSServerAddressOptions) ReplaceServerOptions(options ServerOptions) {
 	*o = DNSServerAddressOptions(options)
 }
 
+type HostsDNSPredefinedValue struct {
+	Addresses []netip.Addr
+	Domain    string
+}
+
+func (v HostsDNSPredefinedValue) MarshalJSON() ([]byte, error) {
+	if v.Domain != "" {
+		return json.Marshal(v.Domain)
+	}
+	switch len(v.Addresses) {
+	case 0:
+		return json.Marshal(nil)
+	case 1:
+		return json.Marshal(v.Addresses[0])
+	default:
+		return json.Marshal(v.Addresses)
+	}
+}
+
+func (v *HostsDNSPredefinedValue) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		addr, parseErr := netip.ParseAddr(s)
+		if parseErr == nil {
+			v.Addresses = []netip.Addr{addr}
+		} else {
+			v.Domain = s
+		}
+		return nil
+	}
+	var addrs []netip.Addr
+	if err := json.Unmarshal(data, &addrs); err == nil {
+		v.Addresses = addrs
+		return nil
+	}
+	return E.New("invalid predefined value: expected IP address(es) or domain name")
+}
+
 type HostsDNSServerOptions struct {
-	Path       badoption.Listable[string]                                `json:"path,omitempty"`
-	Predefined *badjson.TypedMap[string, badoption.Listable[netip.Addr]] `json:"predefined,omitempty"`
+	Path       badoption.Listable[string]                         `json:"path,omitempty"`
+	Predefined *badjson.TypedMap[string, HostsDNSPredefinedValue] `json:"predefined,omitempty"`
 }
 
 type RawLocalDNSServerOptions struct {
@@ -163,16 +206,55 @@ type RemoteDNSServerOptions struct {
 	DNSServerAddressOptions
 }
 
+type RemoteTCPDNSServerOptions struct {
+	RemoteDNSServerOptions
+	Reuse      bool `json:"reuse,omitempty"`
+	Pipeline   bool `json:"pipeline,omitempty"`
+	MaxQueries int  `json:"max_queries,omitempty"`
+}
+
 type RemoteTLSDNSServerOptions struct {
 	RemoteDNSServerOptions
 	OutboundTLSOptionsContainer
+	Pipeline   bool `json:"pipeline,omitempty"`
+	MaxQueries int  `json:"max_queries,omitempty"`
 }
 
-type RemoteHTTPSDNSServerOptions struct {
+type _RemoteHTTPSDNSServerOptions struct {
 	RemoteTLSDNSServerOptions
 	Path    string               `json:"path,omitempty"`
 	Method  string               `json:"method,omitempty"`
 	Headers badoption.HTTPHeader `json:"headers,omitempty"`
+}
+
+type GroupDNSServerOptions struct {
+	Servers []string `json:"servers"`
+}
+
+type RemoteHTTPSDNSServerOptions _RemoteHTTPSDNSServerOptions
+
+func (o *RemoteHTTPSDNSServerOptions) MarshalJSONContext(ctx context.Context) ([]byte, error) {
+	switch o.Method {
+	case http.MethodPost:
+		o.Method = ""
+	}
+	return badjson.MarshallObjectsContext(ctx, (*_RemoteHTTPSDNSServerOptions)(o))
+}
+
+func (o *RemoteHTTPSDNSServerOptions) UnmarshalJSONContext(ctx context.Context, content []byte) error {
+	err := json.UnmarshalContext(ctx, content, (*_RemoteHTTPSDNSServerOptions)(o))
+	if err != nil {
+		return err
+	}
+	switch o.Method {
+	case "", http.MethodPost:
+		o.Method = http.MethodPost
+	case http.MethodGet:
+		o.Method = http.MethodGet
+	default:
+		return E.New("unsupported method")
+	}
+	return nil
 }
 
 type FakeIPDNSServerOptions struct {

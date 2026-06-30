@@ -15,7 +15,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	R "github.com/sagernet/sing-box/route/rule"
-	"github.com/sagernet/sing-tun"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
@@ -42,6 +42,7 @@ type Router struct {
 	client                adapter.DNSClient
 	rawRules              []option.DNSRule
 	rules                 []adapter.DNSRule
+	ruleByUUID            map[string]adapter.DNSRule
 	defaultDomainStrategy C.DomainStrategy
 	dnsReverseMapping     freelru.Cache[netip.Addr, string]
 	platformInterface     adapter.PlatformInterface
@@ -49,6 +50,7 @@ type Router struct {
 	rulesAccess           sync.RWMutex
 	started               bool
 	closing               bool
+	defaultRejectRcode    int
 }
 
 func NewRouter(ctx context.Context, logFactory log.Factory, options option.DNSOptions) (*Router, error) {
@@ -59,7 +61,9 @@ func NewRouter(ctx context.Context, logFactory log.Factory, options option.DNSOp
 		outbound:              service.FromContext[adapter.OutboundManager](ctx),
 		rawRules:              make([]option.DNSRule, 0, len(options.Rules)),
 		rules:                 make([]adapter.DNSRule, 0, len(options.Rules)),
+		ruleByUUID:            make(map[string]adapter.DNSRule),
 		defaultDomainStrategy: C.DomainStrategy(options.Strategy),
+		defaultRejectRcode:    options.DefaultRejectRcode.Build(),
 	}
 	if options.DNSClientOptions.IndependentCache {
 		deprecated.Report(ctx, deprecated.OptionIndependentDNSCache)
@@ -84,7 +88,10 @@ func NewRouter(ctx context.Context, logFactory log.Factory, options option.DNSOp
 		DisableCache:      options.DNSClientOptions.DisableCache,
 		DisableExpire:     options.DNSClientOptions.DisableExpire,
 		OptimisticTimeout: optimisticTimeout,
+		RoundRobinCache:   options.DNSClientOptions.RoundRobinCache,
 		CacheCapacity:     options.DNSClientOptions.CacheCapacity,
+		MinCacheTTL:       options.DNSClientOptions.MinCacheTTL,
+		MaxCacheTTL:       options.DNSClientOptions.MaxCacheTTL,
 		ClientSubnet:      options.DNSClientOptions.ClientSubnet.Build(netip.Prefix{}),
 		RDRC: func() adapter.RDRCStore {
 			cacheFile := service.FromContext[adapter.CacheFile](ctx)
@@ -147,6 +154,10 @@ func (r *Router) Start(stage adapter.StartStage) error {
 			return nil
 		}
 		r.rules = newRules
+		r.ruleByUUID = make(map[string]adapter.DNSRule)
+		for _, rule := range newRules {
+			r.ruleByUUID[rule.UUID()] = rule
+		}
 		r.legacyDNSMode = legacyDNSMode
 		r.started = true
 		r.rulesAccess.Unlock()
@@ -284,6 +295,9 @@ func (r *Router) matchDNS(ctx context.Context, rules []adapter.DNSRule, allowFak
 	}
 	for ; currentRuleIndex < len(rules); currentRuleIndex++ {
 		currentRule := rules[currentRuleIndex]
+		if currentRule.Disabled() {
+			continue
+		}
 		if currentRule.WithAddressLimit() && !isAddressQuery {
 			continue
 		}
@@ -420,6 +434,9 @@ func (r *Router) exchangeWithRules(ctx context.Context, rules []adapter.DNSRule,
 	var evaluatedResponse *mDNS.Msg
 	var evaluatedTransport adapter.DNSTransport
 	for currentRuleIndex, currentRule := range rules {
+		if currentRule.Disabled() {
+			continue
+		}
 		metadata.ResetRuleCache()
 		metadata.DNSResponse = evaluatedResponse
 		metadata.DestinationAddressMatchFromResponse = false
@@ -504,8 +521,10 @@ func (r *Router) exchangeWithRules(ctx context.Context, rules []adapter.DNSRule,
 				}
 			}
 		case *R.RuleActionPredefined:
+			resp := action.Response(message)
+			resp = r.followPredefinedCNAME(ctx, message, resp, effectiveOptions)
 			return exchangeWithRulesResult{
-				response: action.Response(message),
+				response: resp,
 			}
 		}
 	}
@@ -682,10 +701,20 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 				case *R.RuleActionReject:
 					switch action.Method {
 					case C.RuleActionRejectMethodDefault:
+						var rcode int
+						if action.Rcode == -1 {
+							if r.defaultRejectRcode == -1 {
+								rcode = mDNS.RcodeRefused
+							} else {
+								rcode = r.defaultRejectRcode
+							}
+						} else {
+							rcode = action.Rcode
+						}
 						return &mDNS.Msg{
 							MsgHdr: mDNS.MsgHdr{
 								Id:       message.Id,
-								Rcode:    mDNS.RcodeRefused,
+								Rcode:    rcode,
 								Response: true,
 							},
 							Question: []mDNS.Question{message.Question[0]},
@@ -696,6 +725,7 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 				case *R.RuleActionPredefined:
 					err = nil
 					response = action.Response(message)
+					response = r.followPredefinedCNAME(ctx, message, response, dnsOptions)
 					goto done
 				}
 			}
@@ -810,12 +840,28 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
 						err = RcodeError(action.Rcode)
 					} else {
 						err = nil
-						for _, answer := range action.Answer {
+						fakeMsg := &mDNS.Msg{
+							Question: []mDNS.Question{{Name: mDNS.Fqdn(domain), Qtype: mDNS.TypeA, Qclass: mDNS.ClassINET}},
+						}
+						predefinedResp := action.Response(fakeMsg)
+						for _, answer := range predefinedResp.Answer {
 							switch record := answer.(type) {
 							case *mDNS.A:
 								responseAddrs = append(responseAddrs, M.AddrFromIP(record.A))
 							case *mDNS.AAAA:
 								responseAddrs = append(responseAddrs, M.AddrFromIP(record.AAAA))
+							}
+						}
+						if len(responseAddrs) == 0 {
+							if cnameTarget := findLastCNAMETarget(mDNS.Fqdn(domain), predefinedResp.Answer); cnameTarget != "" {
+								cnameOptions := options
+								cnameOptions.DisableOptimisticCache = true
+								aliasCtx, loopDetected := ContextWithAliasResolution(adapter.OverrideContext(ctx), mDNS.Fqdn(domain), cnameTarget)
+								if loopDetected {
+									r.logger.WarnContext(ctx, "predefined CNAME alias loop detected: ", domain, " -> ", FqdnToDomain(cnameTarget))
+								} else {
+									responseAddrs, err = r.Lookup(aliasCtx, FqdnToDomain(cnameTarget), cnameOptions)
+								}
 							}
 						}
 					}
@@ -859,6 +905,106 @@ func addressLimitResponseCheck(rule adapter.DNSRule, metadata *adapter.InboundCo
 		checkMetadata := responseMetadata
 		return rule.MatchAddressLimit(&checkMetadata, response)
 	}
+}
+
+func (r *Router) Rules() []adapter.DNSRule {
+	return r.rules
+}
+
+func (r *Router) Rule(uuid string) (adapter.DNSRule, bool) {
+	rule, exists := r.ruleByUUID[uuid]
+	return rule, exists
+}
+
+func findLastCNAMETarget(name string, records []mDNS.RR) string {
+	current := name
+	visited := map[string]struct{}{current: {}}
+	for {
+		found := false
+		for _, rr := range records {
+			if cname, ok := rr.(*mDNS.CNAME); ok && cname.Hdr.Name == current {
+				if _, seen := visited[cname.Target]; seen {
+					return ""
+				}
+				current = cname.Target
+				visited[current] = struct{}{}
+				found = true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+	}
+	if current == name {
+		return ""
+	}
+	for _, rr := range records {
+		switch rec := rr.(type) {
+		case *mDNS.A:
+			if rec.Hdr.Name == current {
+				return ""
+			}
+		case *mDNS.AAAA:
+			if rec.Hdr.Name == current {
+				return ""
+			}
+		}
+	}
+	return current
+}
+
+func (r *Router) followPredefinedCNAME(ctx context.Context, message *mDNS.Msg, response *mDNS.Msg, options adapter.DNSQueryOptions) *mDNS.Msg {
+	if len(message.Question) == 0 || response == nil {
+		return response
+	}
+	qtype := message.Question[0].Qtype
+	if qtype != mDNS.TypeA && qtype != mDNS.TypeAAAA {
+		return response
+	}
+	cnameTarget := findLastCNAMETarget(message.Question[0].Name, response.Answer)
+	if cnameTarget == "" {
+		return response
+	}
+	r.rulesAccess.RLock()
+	if r.closing {
+		r.rulesAccess.RUnlock()
+		return response
+	}
+	rules := r.rules
+	r.rulesAccess.RUnlock()
+	followMsg := &mDNS.Msg{
+		MsgHdr: mDNS.MsgHdr{RecursionDesired: true},
+		Question: []mDNS.Question{{
+			Name:   cnameTarget,
+			Qtype:  qtype,
+			Qclass: mDNS.ClassINET,
+		}},
+	}
+	followOptions := options
+	followOptions.DisableOptimisticCache = true
+	overCtx := adapter.OverrideContext(ctx)
+	aliasCtx, loopDetected := ContextWithAliasResolution(overCtx, message.Question[0].Name, cnameTarget)
+	if loopDetected {
+		r.logger.WarnContext(ctx, "predefined CNAME alias loop detected: ", FqdnToDomain(message.Question[0].Name), " -> ", FqdnToDomain(cnameTarget))
+		return response
+	}
+	followCtx := withLookupQueryMetadata(aliasCtx, qtype)
+	adapter.ContextFrom(followCtx).Domain = FqdnToDomain(cnameTarget)
+	followResult := r.exchangeWithRules(followCtx, rules, followMsg, followOptions, false)
+	if followResult.err != nil || followResult.response == nil {
+		return response
+	}
+	if followResult.response.Rcode != mDNS.RcodeSuccess || len(followResult.response.Answer) == 0 {
+		return response
+	}
+	merged := response.Copy()
+	for _, rr := range followResult.response.Answer {
+		if rr.Header().Rrtype == qtype || rr.Header().Rrtype == mDNS.TypeCNAME {
+			merged.Answer = append(merged.Answer, rr)
+		}
+	}
+	return merged
 }
 
 func (r *Router) ClearCache() {

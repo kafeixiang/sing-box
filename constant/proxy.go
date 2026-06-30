@@ -6,6 +6,7 @@ const (
 	TypeTProxy             = "tproxy"
 	TypeDirect             = "direct"
 	TypeBlock              = "block"
+	TypePass               = "pass"
 	TypeDNS                = "dns"
 	TypeSOCKS              = "socks"
 	TypeHTTP               = "http"
@@ -20,6 +21,7 @@ const (
 	TypeSSH                = "ssh"
 	TypeShadowTLS          = "shadowtls"
 	TypeAnyTLS             = "anytls"
+	TypeSnell              = "snell"
 	TypeShadowsocksR       = "shadowsocksr"
 	TypeVLESS              = "vless"
 	TypeTUIC               = "tuic"
@@ -38,11 +40,15 @@ const (
 	TypeHysteriaRealm      = "hysteria-realm"
 	TypeACME               = "acme"
 	TypeCloudflareOriginCA = "cloudflare-origin-ca"
+	TypeTrustTunnel        = "trusttunnel"
+
+	TypeJuicity = "juicity"
 )
 
 const (
-	TypeSelector = "selector"
-	TypeURLTest  = "urltest"
+	TypeSelector    = "selector"
+	TypeURLTest     = "urltest"
+	TypeLoadBalance = "loadbalance"
 )
 
 func ProxyDisplayName(proxyType string) string {
@@ -57,6 +63,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "Direct"
 	case TypeBlock:
 		return "Block"
+	case TypePass:
+		return "Pass"
 	case TypeDNS:
 		return "DNS"
 	case TypeSOCKS:
@@ -93,14 +101,22 @@ func ProxyDisplayName(proxyType string) string {
 		return "Hysteria2"
 	case TypeAnyTLS:
 		return "AnyTLS"
+	case TypeSnell:
+		return "Snell"
 	case TypeTailscale:
 		return "Tailscale"
 	case TypeCloudflared:
 		return "Cloudflared"
+	case TypeJuicity:
+		return "Juicity"
+	case TypeTrustTunnel:
+		return "TrustTunnel"
 	case TypeSelector:
 		return "Selector"
 	case TypeURLTest:
 		return "URLTest"
+	case TypeLoadBalance:
+		return "LoadBalance"
 	default:
 		return "Unknown"
 	}

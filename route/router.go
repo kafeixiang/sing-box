@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -15,6 +16,7 @@ import (
 	R "github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/task"
 	"github.com/sagernet/sing/contrab/freelru"
 	"github.com/sagernet/sing/contrab/maphash"
@@ -35,6 +37,7 @@ type Router struct {
 	network           adapter.NetworkManager
 	httpClientManager adapter.HTTPClientManager
 	rules             []adapter.Rule
+	ruleByUUID        map[string]adapter.Rule
 	needFindProcess   bool
 	needFindNeighbor  bool
 	leaseFiles        []string
@@ -48,9 +51,14 @@ type Router struct {
 	trackers          []adapter.ConnectionTracker
 	platformInterface adapter.PlatformInterface
 	started           bool
+
+	quicSniffCache sync.Map
+
+	defaultDomainMatchStrategy C.DomainMatchStrategy
+	reloadChan                 chan<- struct{}
 }
 
-func NewRouter(ctx context.Context, logFactory log.Factory, options option.RouteOptions, dnsOptions option.DNSOptions) *Router {
+func NewRouter(ctx context.Context, logFactory log.Factory, options option.RouteOptions, dnsOptions option.DNSOptions, reloadChan chan<- struct{}) *Router {
 	return &Router{
 		ctx:               ctx,
 		logger:            logFactory.NewLogger("router"),
@@ -62,16 +70,23 @@ func NewRouter(ctx context.Context, logFactory log.Factory, options option.Route
 		network:           service.FromContext[adapter.NetworkManager](ctx),
 		httpClientManager: service.FromContext[adapter.HTTPClientManager](ctx),
 		rules:             make([]adapter.Rule, 0, len(options.Rules)),
+		ruleByUUID:        make(map[string]adapter.Rule),
 		ruleSetMap:        make(map[string]adapter.RuleSet),
 		needFindProcess:   hasRule(options.Rules, isProcessRule) || hasDNSRule(dnsOptions.Rules, isProcessDNSRule) || options.FindProcess,
 		needFindNeighbor:  hasRule(options.Rules, isNeighborRule) || hasDNSRule(dnsOptions.Rules, isNeighborDNSRule) || hasLocalNeighborDNSServer(dnsOptions.Servers) || options.FindNeighbor,
 		leaseFiles:        options.DHCPLeaseFiles,
 		pauseManager:      service.FromContext[pause.Manager](ctx),
 		platformInterface: service.FromContext[adapter.PlatformInterface](ctx),
+
+		defaultDomainMatchStrategy: C.DomainMatchStrategy(options.DefaultDomainMatchStrategy),
+		reloadChan:                 reloadChan,
 	}
 }
 
 func (r *Router) Initialize(rules []option.Rule, ruleSets []option.RuleSet) error {
+	if r.defaultDomainMatchStrategy == C.DomainMatchStrategyFQDNOnly || r.defaultDomainMatchStrategy == C.DomainMatchStrategySniffHostOnly {
+		return E.New("default_domain_match_strategy cannot be fqdn_only or sniffhost_only")
+	}
 	for i, options := range rules {
 		err := R.ValidateNoNestedRuleActions(options)
 		if err != nil {
@@ -81,7 +96,9 @@ func (r *Router) Initialize(rules []option.Rule, ruleSets []option.RuleSet) erro
 		if err != nil {
 			return E.Cause(err, "parse rule[", i, "]")
 		}
+		uuid := rule.UUID()
 		r.rules = append(r.rules, rule)
+		r.ruleByUUID[uuid] = rule
 	}
 	for i, options := range ruleSets {
 		if _, exists := r.ruleSetMap[options.Tag]; exists {
@@ -258,6 +275,10 @@ func (r *Router) Close() error {
 	return err
 }
 
+func (r *Router) RuleSets() []adapter.RuleSet {
+	return r.ruleSets
+}
+
 func (r *Router) RuleSet(tag string) (adapter.RuleSet, bool) {
 	ruleSet, loaded := r.ruleSetMap[tag]
 	return ruleSet, loaded
@@ -286,4 +307,50 @@ func (r *Router) NeighborResolver() adapter.NeighborResolver {
 func (r *Router) ResetNetwork() {
 	r.httpClientManager.ResetNetwork()
 	r.dns.ResetNetwork()
+}
+
+const quicSniffCacheTTL = 5 * time.Minute
+
+type quicSniffCacheKey struct {
+	source      M.Socksaddr
+	destination M.Socksaddr
+}
+
+type quicSniffCacheEntry struct {
+	sniffHost string
+	expiry    time.Time
+}
+
+func (r *Router) cacheQUICSniff(source, destination M.Socksaddr, sniffHost string) {
+	r.quicSniffCache.Store(quicSniffCacheKey{source, destination}, quicSniffCacheEntry{
+		sniffHost: sniffHost,
+		expiry:    time.Now().Add(quicSniffCacheTTL),
+	})
+}
+
+func (r *Router) lookupQUICSniff(source, destination M.Socksaddr) (string, bool) {
+	key := quicSniffCacheKey{source, destination}
+	v, ok := r.quicSniffCache.Load(key)
+	if !ok {
+		return "", false
+	}
+	entry := v.(quicSniffCacheEntry)
+	if time.Now().After(entry.expiry) {
+		r.quicSniffCache.Delete(key)
+		return "", false
+	}
+	return entry.sniffHost, true
+}
+
+func (r *Router) DefaultDomainMatchStrategy() C.DomainMatchStrategy {
+	return r.defaultDomainMatchStrategy
+}
+
+func (r *Router) Reload() {
+	if r.platformInterface == nil {
+		select {
+		case r.reloadChan <- struct{}{}:
+		default:
+		}
+	}
 }

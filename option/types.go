@@ -2,6 +2,7 @@ package option
 
 import (
 	"strings"
+	"time"
 
 	C "github.com/sagernet/sing-box/constant"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -191,5 +192,104 @@ func (t *InterfaceType) UnmarshalJSON(content []byte) error {
 		return E.New("unknown interface type: ", value)
 	}
 	*t = InterfaceType(interfaceType)
+	return nil
+}
+
+type DomainMatchStrategy C.DomainMatchStrategy
+
+func (s DomainMatchStrategy) String() string {
+	switch C.DomainMatchStrategy(s) {
+	case C.DomainMatchStrategyAsIS:
+		return ""
+	case C.DomainMatchStrategyPreferFQDN:
+		return "prefer_fqdn"
+	case C.DomainMatchStrategyPreferSniffHost:
+		return "prefer_sniffhost"
+	case C.DomainMatchStrategyFQDNOnly:
+		return "fqdn_only"
+	case C.DomainMatchStrategySniffHostOnly:
+		return "sniffhost_only"
+	default:
+		panic(E.New("unknown domain match strategy: ", s))
+	}
+}
+
+func (s DomainMatchStrategy) MarshalJSON() ([]byte, error) {
+	var value string
+	switch C.DomainMatchStrategy(s) {
+	case C.DomainMatchStrategyAsIS:
+		value = ""
+		// value = "as_is"
+	case C.DomainMatchStrategyPreferFQDN:
+		value = "prefer_fqdn"
+	case C.DomainMatchStrategyPreferSniffHost:
+		value = "prefer_sniffhost"
+	case C.DomainMatchStrategyFQDNOnly:
+		value = "fqdn_only"
+	case C.DomainMatchStrategySniffHostOnly:
+		value = "sniffhost_only"
+	default:
+		return nil, E.New("unknown domain match strategy: ", s)
+	}
+	return json.Marshal(value)
+}
+
+func (s *DomainMatchStrategy) UnmarshalJSON(bytes []byte) error {
+	var value string
+	err := json.Unmarshal(bytes, &value)
+	if err != nil {
+		return err
+	}
+	switch value {
+	case "", "as_is":
+		*s = DomainMatchStrategy(C.DomainMatchStrategyAsIS)
+	case "prefer_fqdn":
+		*s = DomainMatchStrategy(C.DomainMatchStrategyPreferFQDN)
+	case "prefer_sniffhost":
+		*s = DomainMatchStrategy(C.DomainMatchStrategyPreferSniffHost)
+	case "fqdn_only":
+		*s = DomainMatchStrategy(C.DomainMatchStrategyFQDNOnly)
+	case "sniffhost_only":
+		*s = DomainMatchStrategy(C.DomainMatchStrategySniffHostOnly)
+	default:
+		return E.New("unknown domain match strategy: ", value)
+	}
+	return nil
+}
+
+type TimeRange struct {
+	Start, End time.Time
+}
+
+func (t TimeRange) String() string {
+	return F.ToString(t.Start.Format(time.TimeOnly), "-", t.End.Format(time.TimeOnly))
+}
+
+func (t TimeRange) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.String())
+}
+
+func (t *TimeRange) UnmarshalJSON(content []byte) error {
+	var value string
+	err := json.Unmarshal(content, &value)
+	if err != nil {
+		return err
+	}
+	start, end, loaded := strings.Cut(value, "-")
+	if !loaded {
+		return E.New("invalid time range: ", value)
+	}
+	startTime, err := time.Parse(time.TimeOnly, start)
+	if err != nil {
+		return E.Cause(err, "start time")
+	}
+	endTime, err := time.Parse(time.TimeOnly, end)
+	if err != nil {
+		return E.Cause(err, "end time")
+	}
+	*t = TimeRange{
+		Start: startTime,
+		End:   endTime,
+	}
 	return nil
 }

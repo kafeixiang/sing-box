@@ -47,6 +47,8 @@ func (r RuleAction) MarshalJSON() ([]byte, error) {
 		v = nil
 	case C.RuleActionTypeSniff:
 		v = r.SniffOptions
+	case C.RuleActionTypeSniffOverrideDestination:
+		v = nil
 	case C.RuleActionTypeResolve:
 		v = r.ResolveOptions
 	default:
@@ -80,6 +82,8 @@ func (r *RuleAction) UnmarshalJSON(data []byte) error {
 		v = nil
 	case C.RuleActionTypeSniff:
 		v = &r.SniffOptions
+	case C.RuleActionTypeSniffOverrideDestination:
+		v = nil
 	case C.RuleActionTypeResolve:
 		v = &r.ResolveOptions
 	default:
@@ -100,7 +104,7 @@ type _DNSRuleAction struct {
 	Action              string                       `json:"action,omitempty"`
 	RouteOptions        DNSRouteActionOptions        `json:"-"`
 	RouteOptionsOptions DNSRouteOptionsActionOptions `json:"-"`
-	RejectOptions       RejectActionOptions          `json:"-"`
+	DNSRejectOptions    DNSRejectActionOptions       `json:"-"`
 	PredefinedOptions   DNSRouteActionPredefined     `json:"-"`
 }
 
@@ -122,7 +126,7 @@ func (r DNSRuleAction) MarshalJSON() ([]byte, error) {
 	case C.RuleActionTypeRouteOptions:
 		v = r.RouteOptionsOptions
 	case C.RuleActionTypeReject:
-		v = r.RejectOptions
+		v = r.DNSRejectOptions
 	case C.RuleActionTypePredefined:
 		v = r.PredefinedOptions
 	default:
@@ -151,7 +155,7 @@ func (r *DNSRuleAction) UnmarshalJSONContext(ctx context.Context, data []byte) e
 	case C.RuleActionTypeRouteOptions:
 		v = &r.RouteOptionsOptions
 	case C.RuleActionTypeReject:
-		v = &r.RejectOptions
+		v = &r.DNSRejectOptions
 	case C.RuleActionTypePredefined:
 		v = &r.PredefinedOptions
 	default:
@@ -334,6 +338,7 @@ type RouteActionResolve struct {
 	DisableOptimisticCache bool                  `json:"disable_optimistic_cache,omitempty"`
 	RewriteTTL             *uint32               `json:"rewrite_ttl,omitempty"`
 	ClientSubnet           *badoption.Prefixable `json:"client_subnet,omitempty"`
+	MatchOnly              bool                  `json:"match_only,omitempty"`
 }
 
 type DNSRouteActionPredefined struct {
@@ -341,4 +346,38 @@ type DNSRouteActionPredefined struct {
 	Answer badoption.Listable[DNSRecordOptions] `json:"answer,omitempty"`
 	Ns     badoption.Listable[DNSRecordOptions] `json:"ns,omitempty"`
 	Extra  badoption.Listable[DNSRecordOptions] `json:"extra,omitempty"`
+}
+
+type _DNSRejectActionOptions struct {
+	Rcode  *DNSRejectRCode `json:"rcode,omitempty"`
+	Method string          `json:"method,omitempty"`
+	NoDrop bool            `json:"no_drop,omitempty"`
+}
+
+type DNSRejectActionOptions _DNSRejectActionOptions
+
+func (r DNSRejectActionOptions) MarshalJSON() ([]byte, error) {
+	switch r.Method {
+	case C.RuleActionRejectMethodDefault:
+		r.Method = ""
+	}
+	return json.Marshal((_DNSRejectActionOptions)(r))
+}
+
+func (r *DNSRejectActionOptions) UnmarshalJSON(bytes []byte) error {
+	err := json.Unmarshal(bytes, (*_DNSRejectActionOptions)(r))
+	if err != nil {
+		return err
+	}
+	switch r.Method {
+	case "", C.RuleActionRejectMethodDefault:
+		r.Method = C.RuleActionRejectMethodDefault
+	case C.RuleActionRejectMethodDrop:
+	default:
+		return E.New("unknown reject method: " + r.Method)
+	}
+	if r.Method == C.RuleActionRejectMethodDrop && r.NoDrop {
+		return E.New("no_drop is not available in current context")
+	}
+	return nil
 }

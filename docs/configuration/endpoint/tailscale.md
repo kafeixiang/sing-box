@@ -38,9 +38,11 @@ icon: material/new-box
   "relay_server_static_endpoints": [],
   "system_interface": false,
   "system_interface_name": "",
+  "system_interface_gso": false,
   "system_interface_mtu": 0,
   "udp_timeout": "5m",
   "ssh_server": false,
+  "inner_domain_resolver": "", // or {}
 
   ... // Dial Fields
 }
@@ -145,6 +147,16 @@ Create a system TUN interface for Tailscale.
 
 Custom TUN interface name. By default, `tailscale` (or `utun` on macOS) will be used.
 
+#### system_interface_gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Try to enable generic segmentation offload.
+
+Enabled by default when `system_interface` is true.
+
 #### system_interface_mtu
 
 !!! question "Since sing-box 1.13.0"
@@ -200,6 +212,14 @@ Refuse the SFTP subsystem.
 #### ssh_server.disable_forwarding
 
 Refuse local and remote TCP and Unix-socket forwarding, including SSH agent forwarding.
+
+#### inner_domain_resolver
+
+Set domain resolver for resolving domain names of connections passing through the Tailscale tunnel.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When not set, the default DNS is used.
 
 ### Dial Fields
 

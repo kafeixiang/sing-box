@@ -14,7 +14,7 @@ import (
 	"github.com/sagernet/sing-box/common/tlsspoof"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-tun"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	F "github.com/sagernet/sing/common/format"
@@ -108,6 +108,8 @@ func NewRuleAction(ctx context.Context, logger logger.ContextLogger, action opti
 			Timeout:      time.Duration(action.SniffOptions.Timeout),
 		}
 		return sniffAction, sniffAction.build()
+	case C.RuleActionTypeSniffOverrideDestination:
+		return &RuleActionSniffOverrideDestination{}, nil
 	case C.RuleActionTypeResolve:
 		return &RuleActionResolve{
 			Server:                 action.ResolveOptions.Server,
@@ -117,6 +119,7 @@ func NewRuleAction(ctx context.Context, logger logger.ContextLogger, action opti
 			DisableOptimisticCache: action.ResolveOptions.DisableOptimisticCache,
 			RewriteTTL:             action.ResolveOptions.RewriteTTL,
 			ClientSubnet:           action.ResolveOptions.ClientSubnet.Build(netip.Prefix{}),
+			MatchOnly:              action.ResolveOptions.MatchOnly,
 		}, nil
 	default:
 		panic(F.ToString("unknown rule action: ", action.Action))
@@ -164,8 +167,9 @@ func NewDNSRuleAction(logger logger.ContextLogger, action option.DNSRuleAction) 
 		}
 	case C.RuleActionTypeReject:
 		return &RuleActionReject{
-			Method: action.RejectOptions.Method,
-			NoDrop: action.RejectOptions.NoDrop,
+			Rcode:  action.DNSRejectOptions.Rcode.Build(),
+			Method: action.DNSRejectOptions.Method,
+			NoDrop: action.DNSRejectOptions.NoDrop,
 			logger: logger,
 		}
 	case C.RuleActionTypePredefined:
@@ -423,6 +427,7 @@ func IsBypassed(err error) bool {
 }
 
 type RuleActionReject struct {
+	Rcode       int
 	Method      string
 	NoDrop      bool
 	logger      logger.ContextLogger
@@ -487,8 +492,6 @@ type RuleActionSniff struct {
 	StreamSniffers []sniff.StreamSniffer
 	PacketSniffers []sniff.PacketSniffer
 	Timeout        time.Duration
-	// Deprecated
-	OverrideDestination bool
 }
 
 func (r *RuleActionSniff) Type() string {
@@ -504,6 +507,7 @@ func (r *RuleActionSniff) build() error {
 			r.StreamSniffers = append(r.StreamSniffers, sniff.HTTPHost)
 		case C.ProtocolQUIC:
 			r.PacketSniffers = append(r.PacketSniffers, sniff.QUICClientHello)
+			r.PacketSniffers = append(r.PacketSniffers, sniff.QUICShortHeader)
 		case C.ProtocolDNS:
 			r.StreamSniffers = append(r.StreamSniffers, sniff.StreamDomainNameQuery)
 			r.PacketSniffers = append(r.PacketSniffers, sniff.DomainNameQuery)
@@ -540,6 +544,16 @@ func (r *RuleActionSniff) String() string {
 	}
 }
 
+type RuleActionSniffOverrideDestination struct{}
+
+func (r *RuleActionSniffOverrideDestination) Type() string {
+	return C.RuleActionTypeSniffOverrideDestination
+}
+
+func (r *RuleActionSniffOverrideDestination) String() string {
+	return "sniff-override-destination"
+}
+
 type RuleActionResolve struct {
 	Server                 string
 	Timeout                time.Duration
@@ -548,6 +562,7 @@ type RuleActionResolve struct {
 	DisableOptimisticCache bool
 	RewriteTTL             *uint32
 	ClientSubnet           netip.Prefix
+	MatchOnly              bool
 }
 
 func (r *RuleActionResolve) Type() string {
@@ -576,6 +591,9 @@ func (r *RuleActionResolve) String() string {
 	}
 	if r.ClientSubnet.IsValid() {
 		options = append(options, F.ToString("client_subnet=", r.ClientSubnet))
+	}
+	if r.MatchOnly {
+		options = append(options, "match_only")
 	}
 	if len(options) == 0 {
 		return "resolve"

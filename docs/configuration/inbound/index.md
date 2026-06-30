@@ -22,6 +22,7 @@
 | `socks`       | [SOCKS](./socks/)             | TCP              |
 | `http`        | [HTTP](./http/)               | TCP              |
 | `shadowsocks` | [Shadowsocks](./shadowsocks/) | TCP              |
+| `snell`       | [Snell](./snell/)             | TCP              |
 | `vmess`       | [VMess](./vmess/)             | TCP              |
 | `trojan`      | [Trojan](./trojan/)           | TCP              |
 | `naive`       | [Naive](./naive/)             | :material-close: |
@@ -31,6 +32,7 @@
 | `hysteria2`   | [Hysteria2](./hysteria2/)     | :material-close: |
 | `vless`       | [VLESS](./vless/)             | TCP              |
 | `anytls`      | [AnyTLS](./anytls/)           | TCP              |
+| `trusttunnel` | [TrustTunnel](./trusttunnel/) | TCP              |
 | `tun`         | [Tun](./tun/)                 | :material-close: |
 | `redirect`    | [Redirect](./redirect/)       | :material-close: |
 | `tproxy`      | [TProxy](./tproxy/)           | :material-close: |

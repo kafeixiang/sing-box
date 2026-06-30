@@ -4,7 +4,7 @@ TAGS ?= $(shell cat release/DEFAULT_BUILD_TAGS_OTHERS)
 
 GOHOSTOS = $(shell go env GOHOSTOS)
 GOHOSTARCH = $(shell go env GOHOSTARCH)
-VERSION=$(shell CGO_ENABLED=0 GOOS=$(GOHOSTOS) GOARCH=$(GOHOSTARCH) go run github.com/sagernet/sing-box/cmd/internal/read_tag@latest)
+VERSION=$(shell CGO_ENABLED=0 GOOS=$(GOHOSTOS) GOARCH=$(GOHOSTARCH) go run ./cmd/internal/read_tag)
 
 LDFLAGS_SHARED = $(shell cat release/LDFLAGS)
 PARAMS = -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=$(VERSION)' $(LDFLAGS_SHARED) -s -w -buildid="
@@ -14,7 +14,7 @@ PREFIX ?= $(shell go env GOPATH)
 SING_FFI ?= sing-ffi
 LIBBOX_FFI_CONFIG ?= ./experimental/libbox/ffi.json
 
-.PHONY: test release docs build
+.PHONY: test release docs build generate_json_schema check_json_schema
 
 build:
 	export GOTOOLCHAIN=local && \
@@ -40,6 +40,12 @@ fmt:
 
 fmt_docs:
 	go run ./cmd/internal/format_docs
+
+generate_json_schema:
+	go run ./cmd/internal/generate_json_schema -output docs/configuration/schema.json
+
+check_json_schema:
+	go run ./cmd/internal/generate_json_schema -output docs/configuration/schema.json -check
 
 lint:
 	GOOS=linux golangci-lint run ./...

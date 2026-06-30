@@ -5,7 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/sagernet/sing-tun"
+	C "github.com/sagernet/sing-box/constant"
+	tun "github.com/sagernet/sing-tun"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/x/list"
 
@@ -17,13 +18,18 @@ type Router interface {
 	ConnectionRouter
 	PreMatch(metadata InboundContext, context tun.DirectRouteContext, timeout time.Duration, supportBypass bool) (tun.DirectRouteDestination, error)
 	ConnectionRouterEx
+	RuleSets() []RuleSet
 	RuleSet(tag string) (RuleSet, bool)
 	Rules() []Rule
 	NeedFindProcess() bool
 	NeedFindNeighbor() bool
 	NeighborResolver() NeighborResolver
+	Rule(uuid string) (Rule, bool)
 	AppendTracker(tracker ConnectionTracker)
 	ResetNetwork()
+	DefaultDomainMatchStrategy() C.DomainMatchStrategy
+
+	Reload()
 }
 
 type ConnectionTracker interface {
@@ -45,6 +51,10 @@ type ConnectionRouterEx interface {
 
 type RuleSet interface {
 	Name() string
+	Type() string
+	Format() string
+	UpdatedTime() time.Time
+	Update(ctx context.Context) error
 	StartContext(ctx context.Context, startContext *HTTPStartContext) error
 	Metadata() RuleSetMetadata
 	ExtractIPSet() []*netipx.IPSet

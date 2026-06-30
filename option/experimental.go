@@ -3,10 +3,11 @@ package option
 import "github.com/sagernet/sing/common/json/badoption"
 
 type ExperimentalOptions struct {
-	CacheFile *CacheFileOptions `json:"cache_file,omitempty"`
-	ClashAPI  *ClashAPIOptions  `json:"clash_api,omitempty"`
-	V2RayAPI  *V2RayAPIOptions  `json:"v2ray_api,omitempty"`
-	Debug     *DebugOptions     `json:"debug,omitempty"`
+	CacheFile           *CacheFileOptions `json:"cache_file,omitempty"`
+	ClashAPI            *ClashAPIOptions  `json:"clash_api,omitempty"`
+	V2RayAPI            *V2RayAPIOptions  `json:"v2ray_api,omitempty"`
+	Debug               *DebugOptions     `json:"debug,omitempty"`
+	URLTestUnifiedDelay bool              `json:"urltest_unified_delay,omitempty"`
 }
 
 type CacheFileOptions struct {
@@ -23,7 +24,8 @@ type ClashAPIOptions struct {
 	ExternalController               string                     `json:"external_controller,omitempty"`
 	ExternalUI                       string                     `json:"external_ui,omitempty"`
 	ExternalUIDownloadURL            string                     `json:"external_ui_download_url,omitempty"`
-	ExternalUIDownloadDetour         string                     `json:"external_ui_download_detour,omitempty"`
+	ExternalUIHTTPClient             *HTTPClientOptions         `json:"external_ui_http_client,omitempty"`
+	ExternalUIUpdateInterval         badoption.Duration         `json:"external_ui_update_interval,omitempty"`
 	Secret                           string                     `json:"secret,omitempty"`
 	DefaultMode                      string                     `json:"default_mode,omitempty"`
 	ModeList                         []string                   `json:"-"`
@@ -40,6 +42,8 @@ type ClashAPIOptions struct {
 	StoreSelected bool `json:"store_selected,omitempty"`
 	// Deprecated: migrated to global cache file
 	StoreFakeIP bool `json:"store_fakeip,omitempty"`
+	// Deprecated: use external_ui_http_client instead
+	ExternalUIDownloadDetour string `json:"external_ui_download_detour,omitempty"`
 }
 
 type V2RayAPIOptions struct {

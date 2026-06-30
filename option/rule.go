@@ -94,7 +94,7 @@ type RawDefaultRule struct {
 	PackageNameRegex         badoption.Listable[string]                                                  `json:"package_name_regex,omitempty"`
 	User                     badoption.Listable[string]                                                  `json:"user,omitempty"`
 	UserID                   badoption.Listable[int32]                                                   `json:"user_id,omitempty"`
-	ClashMode                string                                                                      `json:"clash_mode,omitempty"`
+	ClashMode                badoption.Listable[string]                                                  `json:"clash_mode,omitempty"`
 	NetworkType              badoption.Listable[InterfaceType]                                           `json:"network_type,omitempty"`
 	NetworkIsExpensive       bool                                                                        `json:"network_is_expensive,omitempty"`
 	NetworkIsConstrained     bool                                                                        `json:"network_is_constrained,omitempty"`
@@ -108,7 +108,11 @@ type RawDefaultRule struct {
 	PreferredBy              badoption.Listable[string]                                                  `json:"preferred_by,omitempty"`
 	RuleSet                  badoption.Listable[string]                                                  `json:"rule_set,omitempty"`
 	RuleSetIPCIDRMatchSource bool                                                                        `json:"rule_set_ip_cidr_match_source,omitempty"`
+	DomainMatchStrategy      DomainMatchStrategy                                                         `json:"domain_match_strategy,omitempty"`
 	Invert                   bool                                                                        `json:"invert,omitempty"`
+
+	TimeRange badoption.Listable[TimeRange] `json:"time_range,omitempty"`
+	TimeZone  string                        `json:"time_zone,omitempty"`
 
 	// Deprecated: renamed to rule_set_ip_cidr_match_source
 	Deprecated_RulesetIPCIDRMatchSource bool `json:"rule_set_ipcidr_match_source,omitempty"`
@@ -138,9 +142,10 @@ func (r DefaultRule) IsValid() bool {
 }
 
 type RawLogicalRule struct {
-	Mode   string `json:"mode"`
-	Rules  []Rule `json:"rules,omitempty"`
-	Invert bool   `json:"invert,omitempty"`
+	Mode                string              `json:"mode"`
+	Rules               []Rule              `json:"rules,omitempty"`
+	DomainMatchStrategy DomainMatchStrategy `json:"domain_match_strategy,omitempty"`
+	Invert              bool                `json:"invert,omitempty"`
 }
 
 type LogicalRule struct {

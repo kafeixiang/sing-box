@@ -12,6 +12,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/miekg/dns"
 )
 
@@ -59,7 +60,7 @@ func NewDNSRule(ctx context.Context, logger log.ContextLogger, options option.DN
 }
 
 func validateDNSRuleAction(action option.DNSRuleAction) error {
-	if action.Action == C.RuleActionTypeReject && action.RejectOptions.Method == C.RuleActionRejectMethodReply {
+	if action.Action == C.RuleActionTypeReject && action.DNSRejectOptions.Method == C.RuleActionRejectMethodReply {
 		return E.New("reject method `reply` is not supported for DNS rules")
 	}
 	return nil
@@ -77,8 +78,12 @@ func (r *DefaultDNSRule) matchStates(metadata *adapter.InboundContext) ruleMatch
 }
 
 func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options option.DefaultDNSRule, legacyDNSMode bool) (*DefaultDNSRule, error) {
+	id, _ := uuid.NewV4()
 	rule := &DefaultDNSRule{
 		abstractDefaultRule: abstractDefaultRule{
+			abstractRule: abstractRule{
+				uuid: id.String(),
+			},
 			invert: options.Invert,
 			action: NewDNSRuleAction(logger, options.DNSRuleAction),
 		},
@@ -122,7 +127,7 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.Domain) > 0 || len(options.DomainSuffix) > 0 {
-		item, err := NewDomainItem(options.Domain, options.DomainSuffix)
+		item, err := NewDomainItem(options.Domain, options.DomainSuffix, C.DomainMatchStrategyAsIS)
 		if err != nil {
 			return nil, err
 		}
@@ -130,12 +135,12 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.DomainKeyword) > 0 {
-		item := NewDomainKeywordItem(options.DomainKeyword)
+		item := NewDomainKeywordItem(options.DomainKeyword, C.DomainMatchStrategyAsIS)
 		rule.destinationAddressItems = append(rule.destinationAddressItems, item)
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.DomainRegex) > 0 {
-		item, err := NewDomainRegexItem(options.DomainRegex)
+		item, err := NewDomainRegexItem(options.DomainRegex, C.DomainMatchStrategyAsIS)
 		if err != nil {
 			return nil, E.Cause(err, "domain_regex")
 		}
@@ -274,7 +279,7 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
 	}
-	if options.ClashMode != "" {
+	if len(options.ClashMode) > 0 {
 		item := NewClashModeItem(ctx, options.ClashMode)
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
@@ -463,8 +468,12 @@ func (r *LogicalDNSRule) matchStatesForMatch(metadata *adapter.InboundContext) r
 }
 
 func NewLogicalDNSRule(ctx context.Context, logger log.ContextLogger, options option.LogicalDNSRule, legacyDNSMode bool) (*LogicalDNSRule, error) {
+	id, _ := uuid.NewV4()
 	r := &LogicalDNSRule{
 		abstractLogicalRule: abstractLogicalRule{
+			abstractRule: abstractRule{
+				uuid: id.String(),
+			},
 			rules:  make([]adapter.HeadlessRule, len(options.Rules)),
 			invert: options.Invert,
 			action: NewDNSRuleAction(logger, options.DNSRuleAction),

@@ -21,16 +21,23 @@ import (
 )
 
 var (
-	bucketSelected = []byte("selected")
-	bucketExpand   = []byte("group_expand")
-	bucketMode     = []byte("clash_mode")
-	bucketRuleSet  = []byte("rule_set")
+	bucketSelected         = []byte("selected")
+	bucketExpand           = []byte("group_expand")
+	bucketMode             = []byte("clash_mode")
+	bucketRuleSet          = []byte("rule_set")
+	bucketExternalUI       = []byte("external_ui")
+	bucketOutboundProvider = []byte("outbound_provider")
+
+	bucketStorage = []byte("storage")
 
 	bucketNameList = []string{
 		string(bucketSelected),
 		string(bucketExpand),
 		string(bucketMode),
 		string(bucketRuleSet),
+		string(bucketExternalUI),
+		string(bucketOutboundProvider),
+		string(bucketStorage),
 		string(bucketRDRC),
 		string(bucketDNSCache),
 	}
@@ -187,11 +194,7 @@ func (c *CacheFile) start() error {
 	if err != nil {
 		return err
 	}
-	err = filemanager.Chown(c.ctx, c.path)
-	if err != nil {
-		db.Close()
-		return E.Cause(err, "platform chown")
-	}
+	_ = filemanager.Chown(c.ctx, c.path)
 	err = db.Batch(func(tx *bbolt.Tx) error {
 		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
 			if name[0] == 0 {
@@ -409,6 +412,72 @@ func (c *CacheFile) SaveRuleSet(tag string, set *adapter.SavedBinary) error {
 			return err
 		}
 		setBinary, err := set.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(tag), setBinary)
+	})
+}
+
+func (c *CacheFile) LoadExternalUI(tag string) *adapter.SavedBinary {
+	var savedSet adapter.SavedBinary
+	err := c.DB.View(func(t *bbolt.Tx) error {
+		bucket := c.bucket(t, bucketExternalUI)
+		if bucket == nil {
+			return os.ErrNotExist
+		}
+		setBinary := bucket.Get([]byte(tag))
+		if len(setBinary) == 0 {
+			return os.ErrInvalid
+		}
+		return savedSet.UnmarshalBinary(setBinary)
+	})
+	if err != nil {
+		return nil
+	}
+	return &savedSet
+}
+
+func (c *CacheFile) SaveExternalUI(tag string, info *adapter.SavedBinary) error {
+	return c.DB.Batch(func(t *bbolt.Tx) error {
+		bucket, err := c.createBucket(t, bucketExternalUI)
+		if err != nil {
+			return err
+		}
+		setBinary, err := info.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(tag), setBinary)
+	})
+}
+
+func (c *CacheFile) LoadSubscription(tag string) *adapter.SavedBinary {
+	var savedSet adapter.SavedBinary
+	err := c.DB.View(func(t *bbolt.Tx) error {
+		bucket := c.bucket(t, bucketOutboundProvider)
+		if bucket == nil {
+			return os.ErrNotExist
+		}
+		setBinary := bucket.Get([]byte(tag))
+		if len(setBinary) == 0 {
+			return os.ErrInvalid
+		}
+		return savedSet.UnmarshalBinary(setBinary)
+	})
+	if err != nil {
+		return nil
+	}
+	return &savedSet
+}
+
+func (c *CacheFile) SaveSubscription(tag string, sub *adapter.SavedBinary) error {
+	return c.DB.Batch(func(t *bbolt.Tx) error {
+		bucket, err := c.createBucket(t, bucketOutboundProvider)
+		if err != nil {
+			return err
+		}
+		setBinary, err := sub.MarshalBinary()
 		if err != nil {
 			return err
 		}

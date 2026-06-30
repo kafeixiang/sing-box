@@ -3,11 +3,13 @@ package anytls
 import (
 	"context"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
+	"github.com/sagernet/sing-box/common/speedtest"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
@@ -30,17 +32,19 @@ func RegisterInbound(registry *inbound.Registry) {
 
 type Inbound struct {
 	inbound.Adapter
-	tlsConfig tls.ServerConfig
-	router    adapter.ConnectionRouterEx
-	logger    logger.ContextLogger
-	listener  *listener.Listener
-	service   *anytls.Service
+	tlsConfig                tls.ServerConfig
+	router                   adapter.ConnectionRouterEx
+	logger                   logger.ContextLogger
+	listener                 *listener.Listener
+	service                  *anytls.Service
+	fallbackAddr             M.Socksaddr
+	fallbackAddrTLSNextProto map[string]M.Socksaddr
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AnyTLSInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
 		Adapter: inbound.NewAdapter(C.TypeAnyTLS, tag),
-		router:  uot.NewRouter(router, logger),
+		router:  uot.NewRouter(speedtest.NewRouter(router, logger, speedtest.ParseHandleOption(options.SpeedTest)), logger),
 		logger:  logger,
 	}
 
@@ -57,13 +61,39 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		paddingScheme = []byte(strings.Join(options.PaddingScheme, "\n"))
 	}
 
+	var fallbackHandler N.TCPConnectionHandlerEx
+	if options.Fallback != nil && options.Fallback.Server != "" || len(options.FallbackForALPN) > 0 {
+		if options.Fallback != nil && options.Fallback.Server != "" {
+			inbound.fallbackAddr = options.Fallback.Build()
+			if !inbound.fallbackAddr.IsValid() {
+				return nil, E.New("invalid fallback address: ", inbound.fallbackAddr)
+			}
+		}
+		if len(options.FallbackForALPN) > 0 {
+			if inbound.tlsConfig == nil {
+				return nil, E.New("fallback for ALPN is not supported without TLS")
+			}
+			fallbackAddrNextProto := make(map[string]M.Socksaddr)
+			for nextProto, destination := range options.FallbackForALPN {
+				fallbackAddr := destination.Build()
+				if !fallbackAddr.IsValid() {
+					return nil, E.New("invalid fallback address for ALPN ", nextProto, ": ", fallbackAddr)
+				}
+				fallbackAddrNextProto[nextProto] = fallbackAddr
+			}
+			inbound.fallbackAddrTLSNextProto = fallbackAddrNextProto
+		}
+		fallbackHandler = adapter.NewUpstreamContextHandler(inbound.fallbackConnection, nil)
+	}
+
 	service, err := anytls.NewService(anytls.ServiceConfig{
 		Users: common.Map(options.Users, func(it option.AnyTLSUser) anytls.User {
 			return (anytls.User)(it)
 		}),
-		PaddingScheme: paddingScheme,
-		Handler:       (*inboundHandler)(inbound),
-		Logger:        logger,
+		PaddingScheme:   paddingScheme,
+		Handler:         (*inboundHandler)(inbound),
+		FallbackHandler: fallbackHandler,
+		Logger:          logger,
 	})
 	if err != nil {
 		return nil, err
@@ -111,6 +141,35 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
 	}
+}
+
+func (h *Inbound) fallbackConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	var fallbackAddr M.Socksaddr
+	if len(h.fallbackAddrTLSNextProto) > 0 {
+		if tlsConn, loaded := common.Cast[tls.Conn](conn); loaded {
+			connectionState := tlsConn.ConnectionState()
+			if connectionState.NegotiatedProtocol != "" {
+				if fallbackAddr, loaded = h.fallbackAddrTLSNextProto[connectionState.NegotiatedProtocol]; !loaded {
+					h.logger.DebugContext(ctx, "process connection from ", metadata.Source, ": fallback disabled for ALPN: ", connectionState.NegotiatedProtocol)
+					N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
+					return
+				}
+			}
+		}
+	}
+	if !fallbackAddr.IsValid() {
+		if !h.fallbackAddr.IsValid() {
+			h.logger.DebugContext(ctx, "process connection from ", metadata.Source, ": fallback disabled by default")
+			N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
+			return
+		}
+		fallbackAddr = h.fallbackAddr
+	}
+	metadata.Inbound = h.Tag()
+	metadata.InboundType = h.Type()
+	metadata.Destination = fallbackAddr
+	h.logger.InfoContext(ctx, "fallback connection to ", fallbackAddr)
+	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
 type inboundHandler Inbound

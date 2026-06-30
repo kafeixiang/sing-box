@@ -22,6 +22,7 @@
 | `socks`        | [SOCKS](./socks/)               |
 | `http`         | [HTTP](./http/)                 |
 | `shadowsocks`  | [Shadowsocks](./shadowsocks/)   |
+| `snell`        | [Snell](./snell/)               |
 | `vmess`        | [VMess](./vmess/)               |
 | `trojan`       | [Trojan](./trojan/)             |
 | `wireguard`    | [Wireguard](./wireguard/)       |
@@ -37,6 +38,8 @@
 | `selector`     | [Selector](./selector/)         |
 | `urltest`      | [URLTest](./urltest/)           |
 | `naive`        | [NaiveProxy](./naive/)          |
+| `loadbalance`  | [LoadBalance](./loadbalance/)   |
+| `trusttunnel`  | [TrustTunnel](./trusttunnel/)   |
 
 #### tag
 

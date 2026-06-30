@@ -9,6 +9,8 @@ type SocksInboundOptions struct {
 	ListenOptions
 	Users          []auth.User           `json:"users,omitempty"`
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type HTTPMixedInboundOptions struct {
@@ -17,16 +19,19 @@ type HTTPMixedInboundOptions struct {
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
 	SetSystemProxy bool                  `json:"set_system_proxy,omitempty"`
 	InboundTLSOptionsContainer
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type SOCKSOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version    string             `json:"version,omitempty"`
-	Username   string             `json:"username,omitempty"`
-	Password   string             `json:"password,omitempty"`
-	Network    NetworkList        `json:"network,omitempty"`
-	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
+	Version             string                `json:"version,omitempty"`
+	Username            string                `json:"username,omitempty"`
+	Password            string                `json:"password,omitempty"`
+	Network             NetworkList           `json:"network,omitempty"`
+	UDPOverTCP          *UDPOverTCPOptions    `json:"udp_over_tcp,omitempty"`
+	InnerDomainResolver *DomainResolveOptions `json:"inner_domain_resolver,omitempty"`
 }
 
 type HTTPOutboundOptions struct {
@@ -37,4 +42,6 @@ type HTTPOutboundOptions struct {
 	OutboundTLSOptionsContainer
 	Path    string               `json:"path,omitempty"`
 	Headers badoption.HTTPHeader `json:"headers,omitempty"`
+
+	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
 }

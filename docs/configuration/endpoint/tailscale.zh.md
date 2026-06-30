@@ -38,9 +38,11 @@ icon: material/new-box
   "relay_server_static_endpoints": [],
   "system_interface": false,
   "system_interface_name": "",
+  "system_interface_gso": false,
   "system_interface_mtu": 0,
   "udp_timeout": "5m",
   "ssh_server": false,
+  "inner_domain_resolver": "", // 或 {}
 
   ... // 拨号字段
 }
@@ -144,6 +146,16 @@ icon: material/new-box
 
 自定义 TUN 接口名。默认使用 `tailscale`（macOS 上为 `utun`）。
 
+#### system_interface_gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试启用通用分段卸载。
+
+当 `system_interface` 为 true 时，默认启用。
+
 #### system_interface_mtu
 
 !!! question "自 sing-box 1.13.0 起"
@@ -199,6 +211,14 @@ UDP NAT 过期时间。
 #### ssh_server.disable_forwarding
 
 拒绝本地和远程的 TCP 与 Unix 套接字转发，包括 SSH agent 转发。
+
+#### inner_domain_resolver
+
+设置用于解析通过 Tailscale 隊道的连接的域名解析器。
+
+此选项与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 格式相同。
+
+未设置时使用默认DNS。
 
 ### 拨号字段
 

@@ -9,6 +9,7 @@
   
   "system": false,
   "name": "",
+  "gso": false,
   "mtu": 1408,
   "address": [],
   "private_key": "",
@@ -26,6 +27,7 @@
   ],
   "udp_timeout": "",
   "workers": 0,
+  "inner_domain_resolver": "", // or {}
  
   ... // Dial Fields
 }
@@ -46,6 +48,16 @@ Requires privilege and cannot conflict with exists system interfaces.
 #### name
 
 Custom interface name for system interface.
+
+#### gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Try to enable generic segmentation offload.
+
+Enabled by default when `system` is true.
 
 #### mtu
 
@@ -123,6 +135,14 @@ UDP NAT expiration time.
 WireGuard worker count.
 
 CPU count is used by default.
+
+#### inner_domain_resolver
+
+Set domain resolver for resolving domain names of connections passing through the WireGuard tunnel.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When not set, the default DNS is used.
 
 ### Dial Fields
 

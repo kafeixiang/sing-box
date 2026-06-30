@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"time"
 
@@ -13,11 +14,11 @@ import (
 	"github.com/sagernet/sing/common"
 	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/json"
-	"github.com/sagernet/ws"
-	"github.com/sagernet/ws/wsutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
+	"github.com/gobwas/ws"
+	"github.com/gobwas/ws/wsutil"
 	"github.com/gofrs/uuid/v5"
 )
 
@@ -54,10 +55,16 @@ func (c connectionObject) MarshalJSON() ([]byte, error) {
 		inbound = c.Metadata.InboundType
 	}
 	var domain string
-	if c.Metadata.Domain != "" {
-		domain = c.Metadata.Domain
-	} else {
+	if c.Metadata.Destination.Fqdn != "" {
 		domain = c.Metadata.Destination.Fqdn
+	} else {
+		domain = c.Metadata.Domain
+	}
+	var destinationAddr netip.Addr
+	if len(c.Metadata.DestinationAddresses) > 0 {
+		destinationAddr = c.Metadata.DestinationAddresses[0]
+	} else {
+		destinationAddr = c.Metadata.Destination.Addr
 	}
 	var processPath string
 	if c.Metadata.ProcessInfo != nil {
@@ -82,23 +89,25 @@ func (c connectionObject) MarshalJSON() ([]byte, error) {
 	} else {
 		rule = "final"
 	}
+	chains := trafficcontrol.TrackerMetadata(c).Chains()
 	return json.Marshal(map[string]any{
 		"id": c.ID,
 		"metadata": map[string]any{
 			"network":         c.Metadata.Network,
 			"type":            inbound,
 			"sourceIP":        c.Metadata.Source.Addr,
-			"destinationIP":   c.Metadata.Destination.Addr,
+			"destinationIP":   destinationAddr,
 			"sourcePort":      F.ToString(c.Metadata.Source.Port),
 			"destinationPort": F.ToString(c.Metadata.Destination.Port),
 			"host":            domain,
+			"sniffHost":       c.Metadata.SniffHost,
 			"dnsMode":         "normal",
 			"processPath":     processPath,
 		},
 		"upload":      c.Upload.Load(),
 		"download":    c.Download.Load(),
 		"start":       c.CreatedAt,
-		"chains":      c.Chain,
+		"chains":      chains,
 		"rule":        rule,
 		"rulePayload": "",
 	})
