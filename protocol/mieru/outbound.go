@@ -51,7 +51,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	return &Outbound{
-		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeMieru, tag, []string(options.Network), options.DialerOptions),
+		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeMieru, tag, options.Network.Build(), options.DialerOptions),
 		logger:  logger,
 		dialer:  outboundDialer,
 		client:  c,

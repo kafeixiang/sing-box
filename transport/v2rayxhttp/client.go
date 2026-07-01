@@ -19,7 +19,7 @@ import (
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/vision"
 	"github.com/sagernet/sing-box/common/xray/buf"
-	"github.com/sagernet/sing-box/common/xray/net"
+	xnet "github.com/sagernet/sing-box/common/xray/net"
 	"github.com/sagernet/sing-box/common/xray/pipe"
 	"github.com/sagernet/sing-box/common/xray/signal/done"
 	"github.com/sagernet/sing-box/common/xray/uuid"
@@ -373,7 +373,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 	switch httpVersion {
 	case "3":
 		if keepAlivePeriod == 0 {
-			keepAlivePeriod = net.QuicgoH3KeepAlivePeriod
+			keepAlivePeriod = xnet.QuicgoH3KeepAlivePeriod
 		}
 		if keepAlivePeriod < 0 {
 			keepAlivePeriod = 0
@@ -395,7 +395,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 			h3TLSConfig = &gotls.Config{}
 		}
 		quicConfig := &quic.Config{
-			MaxIdleTimeout: net.ConnIdleTimeout,
+			MaxIdleTimeout: xnet.ConnIdleTimeout,
 			// these two are defaults of quic-go/http3. the default of quic-go (no
 			// http3) is different, so it is hardcoded here for clarity.
 			// https://github.com/quic-go/quic-go/blob/b8ea5c798155950fb5bbfdd06cad1939c9355878/http3/client.go#L36-L39
@@ -415,7 +415,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 		}
 	case "2":
 		if keepAlivePeriod == 0 {
-			keepAlivePeriod = net.ChromeH2KeepAlivePeriod
+			keepAlivePeriod = xnet.ChromeH2KeepAlivePeriod
 		}
 		if keepAlivePeriod < 0 {
 			keepAlivePeriod = 0
@@ -424,7 +424,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 			DialTLSContext: func(ctxInner context.Context, network string, addr string, cfg *gotls.Config) (net.Conn, error) {
 				return dialContext(ctxInner)
 			},
-			IdleConnTimeout: net.ConnIdleTimeout,
+			IdleConnTimeout: xnet.ConnIdleTimeout,
 			ReadIdleTimeout: keepAlivePeriod,
 		}
 	default:
@@ -434,7 +434,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 		transport = &http.Transport{
 			DialTLSContext:  httpDialContext,
 			DialContext:     httpDialContext,
-			IdleConnTimeout: net.ConnIdleTimeout,
+			IdleConnTimeout: xnet.ConnIdleTimeout,
 			// chunked transfer download with KeepAlives is buggy with
 			// http.Client and our custom dial context.
 			DisableKeepAlives: true,
