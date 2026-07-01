@@ -88,7 +88,7 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
-	conn, err := h.client.DialContext(ctx, destination.UDPAddr())
+	conn, err := h.client.DialContext(ctx, destination)
 	if err != nil {
 		return nil, err
 	}

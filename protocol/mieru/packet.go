@@ -21,12 +21,12 @@ type mieruPacketConn struct {
 var _ N.PacketConn = (*mieruPacketConn)(nil)
 
 func (c *mieruPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	return c.PacketConn.WriteTo(p, c.destination.UDPAddr())
+	return c.PacketConn.WriteTo(p, c.destination)
 }
 
 func (c *mieruPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	n, _, err = c.PacketConn.ReadFrom(p)
-	return n, c.destination.UDPAddr(), err
+	return n, c.destination, err
 }
 
 func (c *mieruPacketConn) LocalAddr() net.Addr {
@@ -37,7 +37,7 @@ func (c *mieruPacketConn) LocalAddr() net.Addr {
 }
 
 func (c *mieruPacketConn) RemoteAddr() net.Addr {
-	return c.destination.UDPAddr()
+	return c.destination
 }
 
 func (c *mieruPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
