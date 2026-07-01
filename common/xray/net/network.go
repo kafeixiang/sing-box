@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ConnIdleTimeout         = N.TCPTimeout
+	ConnIdleTimeout         = 600 * time.Second
 	ChromeH2KeepAlivePeriod = 45 * time.Second
 	QuicgoH3KeepAlivePeriod = 30 * time.Second
 )

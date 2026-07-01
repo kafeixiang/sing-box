@@ -51,7 +51,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	return &Outbound{
-		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeMieru, tag, options.Network.Build(), options.DialerOptions),
+		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeMieru, tag, []string(options.Network), options.DialerOptions),
 		logger:  logger,
 		dialer:  outboundDialer,
 		client:  c,
@@ -79,7 +79,7 @@ func (h *Outbound) Close() error {
 func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	h.logger.InfoContext(ctx, "outbound connection to ", destination)
 
-	conn, err := h.client.DialContext(ctx, destination.NetAddr(network))
+	conn, err := h.client.DialContext(ctx, destination)
 	if err != nil {
 		return nil, err
 	}
@@ -148,24 +148,3 @@ func buildMieruClientConfig(options option.MieruOutboundOptions) (*mieruclient.C
 	}, nil
 }
 
-type mieruPacketConn struct {
-	net.PacketConn
-	destination M.Socksaddr
-}
-
-func (c *mieruPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	return c.PacketConn.WriteTo(p, c.destination.UDPAddr())
-}
-
-func (c *mieruPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, _, err = c.PacketConn.ReadFrom(p)
-	return n, c.destination.UDPAddr(), err
-}
-
-func (c *mieruPacketConn) LocalAddr() net.Addr {
-	return &net.UDPAddr{IP: net.IPv4zero, Port: 0}
-}
-
-func (c *mieruPacketConn) RemoteAddr() net.Addr {
-	return c.destination.UDPAddr()
-}
