@@ -11,6 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/cretz/bine v0.2.0
 	github.com/database64128/tfo-go/v2 v2.3.2
+	github.com/enfein/mieru/v3 v3.34.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/render v1.0.3
 	github.com/godbus/dbus/v5 v5.2.2
@@ -18,18 +19,21 @@ require (
 	github.com/insomniacslk/dhcp v0.0.0-20260220084031-5adc3eb26f91
 	github.com/jsimonetti/rtnetlink v1.4.0
 	github.com/keybase/go-keychain v0.0.1
+	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/libdns/acmedns v0.5.0
 	github.com/libdns/alidns v1.0.6
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/libdns v1.1.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mdlayher/netlink v1.9.0
+	github.com/metacubex/mihomo v1.19.27
 	github.com/metacubex/utls v1.8.4
 	github.com/mholt/acmez/v3 v3.1.6
 	github.com/miekg/dns v1.1.72
 	github.com/openai/openai-go/v3 v3.26.0
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pkg/sftp v1.13.10
+	github.com/reF1nd/sing-snell v0.0.8
 	github.com/sagernet/asc-go v0.0.0-20241217030726-d563060fe4e1
 	github.com/sagernet/bbolt v0.0.0-20231014093535-ea5cb2fe9f0a
 	github.com/sagernet/cors v1.2.1
@@ -68,6 +72,17 @@ require (
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
 	howett.net/plist v1.0.1
+	lukechampine.com/blake3 v1.3.0
+)
+
+require (
+	github.com/kr/pretty v0.1.0 // indirect
+	github.com/metacubex/chacha v0.1.5 // indirect
+	github.com/metacubex/randv2 v0.2.0 // indirect
+	github.com/metacubex/sing v0.5.7 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
+	gitlab.com/go-extension/aes-ccm v0.0.0-20230221065045-e58665ef23c7 // indirect
+	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 )
 
 require (
@@ -75,10 +90,10 @@ require (
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
-	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
+	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
 	github.com/database64128/netx-go v0.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -87,14 +102,14 @@ require (
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.0.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gaissmai/bart v0.18.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
@@ -104,12 +119,11 @@ require (
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
-	github.com/pierrec/lz4/v4 v4.1.21 // indirect
+	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus-community/pro-bing v0.4.0 // indirect
@@ -148,7 +162,7 @@ require (
 	github.com/sagernet/nftables v0.3.0-mod.2 // indirect
 	github.com/sagernet/sing-usbip v0.0.0-20260616101517-efb91521eddb
 	github.com/spf13/pflag v1.0.9 // indirect
-	github.com/tailscale/certstore v0.1.1-0.20231202035212-d3fa0460f47e // indirect
+	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a // indirect
@@ -174,6 +188,11 @@ require (
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	lukechampine.com/blake3 v1.3.0 // indirect
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
+
+replace github.com/sagernet/sing-vmess => github.com/starifly/sing-vmess v0.2.8-mod.1
+
+replace software.sslmate.com/src/go-pkcs12 => github.com/sslmate/go-pkcs12 v0.7.3
+
+replace github.com/metacubex/sing-shadowsocks2 => github.com/Restia-Ashbell/sing-shadowsocks2 v0.0.0-20250606153500-31ef7b14aaa6

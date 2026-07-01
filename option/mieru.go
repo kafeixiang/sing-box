@@ -7,6 +7,7 @@ type MieruOutboundOptions struct {
 	ServerOptions
 	ServerPortRanges badoption.Listable[string] `json:"server_ports,omitempty"`
 	Transport        string                     `json:"transport,omitempty"`
+	Network          badoption.Listable[string] `json:"network,omitempty"`
 	UserName         string                     `json:"username,omitempty"`
 	Password         string                     `json:"password,omitempty"`
 	Multiplexing     string                     `json:"multiplexing,omitempty"`

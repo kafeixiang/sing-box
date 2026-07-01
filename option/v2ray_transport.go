@@ -21,6 +21,7 @@ type _V2RayTransportOptions struct {
 	GRPCOptions        V2RayGRPCOptions        `json:"-"`
 	HTTPUpgradeOptions V2RayHTTPUpgradeOptions `json:"-"`
 	XHTTPOptions       V2RayXHTTPOptions       `json:"-"`
+	KCPOptions         V2RayKCPOptions         `json:"-"`
 }
 
 type V2RayTransportOptions _V2RayTransportOptions
@@ -40,6 +41,8 @@ func (o V2RayTransportOptions) MarshalJSON() ([]byte, error) {
 		v = o.HTTPUpgradeOptions
 	case C.V2RayTransportTypeXHTTP:
 		v = o.XHTTPOptions
+	case C.V2RayTransportTypeKCP:
+		v = o.KCPOptions
 	case "":
 		return nil, E.New("missing transport type")
 	default:
@@ -67,6 +70,8 @@ func (o *V2RayTransportOptions) UnmarshalJSON(bytes []byte) error {
 		v = &o.HTTPUpgradeOptions
 	case C.V2RayTransportTypeXHTTP:
 		v = &o.XHTTPOptions
+	case C.V2RayTransportTypeKCP:
+		v = &o.KCPOptions
 	default:
 		return E.New("unknown transport type: " + o.Type)
 	}
@@ -249,4 +254,77 @@ func (m *V2RayXHTTPXmuxOptions) GetNormalizedHMaxRequestTimes() Xbadoption.Range
 
 func (m *V2RayXHTTPXmuxOptions) GetNormalizedHMaxReusableSecs() Xbadoption.Range {
 	return m.HMaxReusableSecs
+}
+
+type V2RayKCPOptions struct {
+	MTU              uint32 `json:"mtu,omitempty"`
+	TTI              uint32 `json:"tti,omitempty"`
+	UplinkCapacity   uint32 `json:"uplink_capacity,omitempty"`
+	DownlinkCapacity uint32 `json:"downlink_capacity,omitempty"`
+	Congestion       bool   `json:"congestion,omitempty"`
+	ReadBufferSize   uint32 `json:"read_buffer_size,omitempty"`
+	WriteBufferSize  uint32 `json:"write_buffer_size,omitempty"`
+	CwndMultiplier   uint32 `json:"cwnd_multiplier,omitempty"`
+	HeaderType       string `json:"header_type,omitempty"`
+	Seed             string `json:"seed,omitempty"`
+}
+
+func (o V2RayKCPOptions) GetMTU() uint32 {
+	if o.MTU == 0 {
+		return 1350
+	}
+	return o.MTU
+}
+
+func (o V2RayKCPOptions) GetTTI() uint32 {
+	if o.TTI == 0 {
+		return 50
+	}
+	return o.TTI
+}
+
+func (o V2RayKCPOptions) GetUplinkCapacity() uint32 {
+	if o.UplinkCapacity == 0 {
+		return 12
+	}
+	return o.UplinkCapacity
+}
+
+func (o V2RayKCPOptions) GetDownlinkCapacity() uint32 {
+	if o.DownlinkCapacity == 0 {
+		return 100
+	}
+	return o.DownlinkCapacity
+}
+
+func (o V2RayKCPOptions) GetReadBufferSize() uint32 {
+	if o.ReadBufferSize == 0 {
+		return 2
+	}
+	return o.ReadBufferSize
+}
+
+func (o V2RayKCPOptions) GetWriteBufferSize() uint32 {
+	if o.WriteBufferSize == 0 {
+		return 2
+	}
+	return o.WriteBufferSize
+}
+
+func (o V2RayKCPOptions) GetCwndMultiplier() uint32 {
+	if o.CwndMultiplier == 0 {
+		return 20
+	}
+	return o.CwndMultiplier
+}
+
+func (o V2RayKCPOptions) GetHeaderType() string {
+	if o.HeaderType == "" {
+		return "none"
+	}
+	return o.HeaderType
+}
+
+func (o V2RayKCPOptions) GetMaxSendingWindow() uint32 {
+	return o.GetUplinkCapacity() * 1024 * 1024 / o.GetMTU() / (1000 / o.GetTTI())
 }

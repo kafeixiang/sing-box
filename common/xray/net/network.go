@@ -1,5 +1,17 @@
 package net
 
+import (
+	"time"
+
+	N "github.com/sagernet/sing/common/network"
+)
+
+const (
+	ConnIdleTimeout         = N.TCPTimeout
+	ChromeH2KeepAlivePeriod = 45 * time.Second
+	QuicgoH3KeepAlivePeriod = 30 * time.Second
+)
+
 type Network int32
 
 const (
