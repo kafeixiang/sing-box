@@ -259,6 +259,7 @@ func (d *v5DeadlineTestDialer) ListenPacket(context.Context, M.Socksaddr) (net.P
 
 type v5DeadlineTestClient struct {
 	writeStarted chan struct{}
+	resetCalled  bool
 }
 
 func (c *v5DeadlineTestClient) DialContext(context.Context, M.Socksaddr) (net.Conn, error) {
@@ -279,7 +280,21 @@ func (c *v5DeadlineTestClient) DialPacketConn(conn net.Conn) (N.NetPacketConn, e
 	return nil, err
 }
 
+func (c *v5DeadlineTestClient) Reset() { c.resetCalled = true }
+
 func (c *v5DeadlineTestClient) Close() error { return nil }
+
+func TestInterfaceUpdated(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) {
+		require.NotPanics(t, (&Outbound{}).InterfaceUpdated)
+	})
+	t.Run("client", func(t *testing.T) {
+		client := &v5DeadlineTestClient{}
+		outbound := &Outbound{client: client}
+		outbound.InterfaceUpdated()
+		require.True(t, client.resetCalled)
+	})
+}
 
 func TestV5LazyPacketConnWriteDeadlineDuringInit(t *testing.T) {
 	clientConn, serverConn := net.Pipe()

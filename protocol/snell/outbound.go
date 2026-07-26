@@ -48,9 +48,12 @@ type Outbound struct {
 	quicDestSeq   atomic.Uint64
 }
 
+var _ adapter.InterfaceUpdateListener = (*Outbound)(nil)
+
 type snellClient interface {
 	snellprotocol.Method
 	DialContext(ctx context.Context, destination M.Socksaddr) (net.Conn, error)
+	Reset()
 	Close() error
 }
 
@@ -217,6 +220,12 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		return newV5LazyPacketConn(ctx, h, metadata.Source, destination, metadata.Protocol == C.ProtocolQUIC || h.isRecentQUICDest(metadata.Source, destination)), nil
 	}
 	return h.dialUDPOverTCP(ctx)
+}
+
+func (h *Outbound) InterfaceUpdated() {
+	if h.client != nil {
+		h.client.Reset()
+	}
 }
 
 func (h *Outbound) Close() error {
