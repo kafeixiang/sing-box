@@ -44,6 +44,7 @@ type Outbound struct {
 	psk           []byte
 	userKey       []byte
 	version       int
+	quicProxyMode bool
 	quicDestCache *expiringmap.Map[quicDestCacheKey, uint64]
 	quicDestSeq   atomic.Uint64
 }
@@ -68,7 +69,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	serverAddr := options.ServerOptions.Build()
 	version := options.Version
 	if version == 0 {
-		version = 4
+		return nil, E.New("snell: missing version")
 	}
 	if version == 6 && (len(options.PSK) < 12 || len(options.PSK) > 255) {
 		return nil, E.New("snell: psk length must be between 12 and 255 bytes")
@@ -127,18 +128,19 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 	outbound := &Outbound{
-		Adapter:    outbound.NewAdapterWithDialerOptions(C.TypeSnell, tag, networks, options.DialerOptions),
-		logger:     logger,
-		dialer:     outboundDialer,
-		tcpDialer:  tcpDialer,
-		client:     client,
-		legacy:     legacyClient,
-		serverAddr: serverAddr,
-		psk:        []byte(options.PSK),
-		userKey:    []byte(options.UserKey),
-		version:    version,
+		Adapter:       outbound.NewAdapterWithDialerOptions(C.TypeSnell, tag, networks, options.DialerOptions),
+		logger:        logger,
+		dialer:        outboundDialer,
+		tcpDialer:     tcpDialer,
+		client:        client,
+		legacy:        legacyClient,
+		serverAddr:    serverAddr,
+		psk:           []byte(options.PSK),
+		userKey:       []byte(options.UserKey),
+		version:       version,
+		quicProxyMode: version == 5 || version == 6 && options.V6Options.QUICProxyMode,
 	}
-	if version == 5 {
+	if outbound.quicProxyMode {
 		outbound.quicDestCache = expiringmap.New[quicDestCacheKey, uint64](quicDestCacheTTL)
 	}
 	return outbound, nil
@@ -197,8 +199,8 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 		return h.client.DialContext(ctx, destination)
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
-		if h.version == 5 {
-			packetConn := newV5LazyPacketConn(ctx, h, metadata.Source, destination, metadata.Protocol == C.ProtocolQUIC || h.isRecentQUICDest(metadata.Source, destination))
+		if h.quicProxyMode {
+			packetConn := newQUICProxyLazyPacketConn(ctx, h, metadata.Source, destination, metadata.Protocol == C.ProtocolQUIC || h.isRecentQUICDest(metadata.Source, destination))
 			return &packetConnWrapper{PacketConn: packetConn, destination: destination}, nil
 		}
 		packetConn, err := h.dialUDPOverTCP(ctx)
@@ -216,8 +218,8 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
-	if h.version == 5 {
-		return newV5LazyPacketConn(ctx, h, metadata.Source, destination, metadata.Protocol == C.ProtocolQUIC || h.isRecentQUICDest(metadata.Source, destination)), nil
+	if h.quicProxyMode {
+		return newQUICProxyLazyPacketConn(ctx, h, metadata.Source, destination, metadata.Protocol == C.ProtocolQUIC || h.isRecentQUICDest(metadata.Source, destination)), nil
 	}
 	return h.dialUDPOverTCP(ctx)
 }
@@ -314,7 +316,7 @@ func (h *Outbound) refreshQUICDest(source M.Socksaddr, destination M.Socksaddr, 
 	})
 }
 
-type v5LazyPacketConn struct {
+type quicProxyLazyPacketConn struct {
 	outbound    *Outbound
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -340,7 +342,7 @@ type v5LazyPacketConn struct {
 	writeTimer     pipe.Deadline
 }
 
-func newV5LazyPacketConn(ctx context.Context, outbound *Outbound, source M.Socksaddr, destination M.Socksaddr, sniffQUIC bool) *v5LazyPacketConn {
+func newQUICProxyLazyPacketConn(ctx context.Context, outbound *Outbound, source M.Socksaddr, destination M.Socksaddr, sniffQUIC bool) *quicProxyLazyPacketConn {
 	initCtx := context.WithoutCancel(ctx)
 	var cancel context.CancelFunc
 	if deadline, loaded := ctx.Deadline(); loaded {
@@ -348,7 +350,7 @@ func newV5LazyPacketConn(ctx context.Context, outbound *Outbound, source M.Socks
 	} else {
 		initCtx, cancel = context.WithCancel(initCtx)
 	}
-	return &v5LazyPacketConn{
+	return &quicProxyLazyPacketConn{
 		outbound: outbound, ctx: initCtx, cancel: cancel,
 		source: source, destination: destination, sniffQUIC: sniffQUIC,
 		initDone: make(chan struct{}), closed: make(chan struct{}),
@@ -356,7 +358,7 @@ func newV5LazyPacketConn(ctx context.Context, outbound *Outbound, source M.Socks
 	}
 }
 
-func (c *v5LazyPacketConn) initialize(payload []byte) {
+func (c *quicProxyLazyPacketConn) initialize(payload []byte) {
 	initCtx, initCancel := context.WithCancel(c.ctx)
 	deadlineMonitorDone := make(chan struct{})
 	var writeDeadlineExceeded atomic.Bool
@@ -408,7 +410,7 @@ func (c *v5LazyPacketConn) initialize(payload []byte) {
 	}
 }
 
-func (c *v5LazyPacketConn) registerInitializingConn(conn net.Conn) error {
+func (c *quicProxyLazyPacketConn) registerInitializingConn(conn net.Conn) error {
 	c.deadlineAccess.Lock()
 	defer c.deadlineAccess.Unlock()
 	select {
@@ -423,7 +425,7 @@ func (c *v5LazyPacketConn) registerInitializingConn(conn net.Conn) error {
 	return conn.SetWriteDeadline(c.writeDeadline)
 }
 
-func (c *v5LazyPacketConn) dialQUICProxy(ctx context.Context, initialPayload []byte) (net.PacketConn, error) {
+func (c *quicProxyLazyPacketConn) dialQUICProxy(ctx context.Context, initialPayload []byte) (net.PacketConn, error) {
 	conn, err := c.outbound.dialer.DialContext(ctx, N.NetworkUDP, c.outbound.serverAddr)
 	if err != nil {
 		return nil, err
@@ -440,7 +442,7 @@ func (c *v5LazyPacketConn) dialQUICProxy(ctx context.Context, initialPayload []b
 	return packetConn, nil
 }
 
-func (c *v5LazyPacketConn) dialUDPOverTCP(ctx context.Context) (net.PacketConn, error) {
+func (c *quicProxyLazyPacketConn) dialUDPOverTCP(ctx context.Context) (net.PacketConn, error) {
 	conn, err := c.outbound.tcpDialer.DialContext(ctx, N.NetworkTCP, c.outbound.serverAddr)
 	if err != nil {
 		return nil, err
@@ -462,7 +464,7 @@ func (c *v5LazyPacketConn) dialUDPOverTCP(ctx context.Context) (net.PacketConn, 
 	return packetConn, nil
 }
 
-func (c *v5LazyPacketConn) WriteTo(payload []byte, destination net.Addr) (int, error) {
+func (c *quicProxyLazyPacketConn) WriteTo(payload []byte, destination net.Addr) (int, error) {
 	select {
 	case <-c.closed:
 		return 0, net.ErrClosed
@@ -504,7 +506,7 @@ func (c *v5LazyPacketConn) WriteTo(payload []byte, destination net.Addr) (int, e
 	return c.conn.WriteTo(payload, destination)
 }
 
-func (c *v5LazyPacketConn) ReadFrom(payload []byte) (int, net.Addr, error) {
+func (c *quicProxyLazyPacketConn) ReadFrom(payload []byte) (int, net.Addr, error) {
 	conn, err := c.readConn()
 	if err != nil {
 		return 0, nil, err
@@ -512,7 +514,7 @@ func (c *v5LazyPacketConn) ReadFrom(payload []byte) (int, net.Addr, error) {
 	return conn.ReadFrom(payload)
 }
 
-func (c *v5LazyPacketConn) readConn() (net.PacketConn, error) {
+func (c *quicProxyLazyPacketConn) readConn() (net.PacketConn, error) {
 	select {
 	case <-c.closed:
 		return nil, net.ErrClosed
@@ -536,7 +538,7 @@ func (c *v5LazyPacketConn) readConn() (net.PacketConn, error) {
 	return c.conn, nil
 }
 
-func (c *v5LazyPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
+func (c *quicProxyLazyPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	conn, err := c.readConn()
 	if err != nil {
 		return M.Socksaddr{}, err
@@ -552,13 +554,13 @@ func (c *v5LazyPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	return M.SocksaddrFromNet(source).Unwrap(), nil
 }
 
-func (c *v5LazyPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+func (c *quicProxyLazyPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	defer buffer.Release()
 	_, err := c.WriteTo(buffer.Bytes(), destination)
 	return err
 }
 
-func (c *v5LazyPacketConn) Close() error {
+func (c *quicProxyLazyPacketConn) Close() error {
 	c.closeRequested.Store(true)
 	c.closedOnce.Do(func() {
 		close(c.closed)
@@ -585,13 +587,13 @@ func (c *v5LazyPacketConn) Close() error {
 	}
 }
 
-func (c *v5LazyPacketConn) refreshQUICDestOnClose() {
+func (c *quicProxyLazyPacketConn) refreshQUICDestOnClose() {
 	if c.outbound != nil {
 		c.outbound.refreshQUICDest(c.source, c.destination, c.quicDestToken)
 	}
 }
 
-func (c *v5LazyPacketConn) LocalAddr() net.Addr {
+func (c *quicProxyLazyPacketConn) LocalAddr() net.Addr {
 	select {
 	case <-c.initDone:
 		if c.conn != nil {
@@ -602,7 +604,7 @@ func (c *v5LazyPacketConn) LocalAddr() net.Addr {
 	return &net.UDPAddr{}
 }
 
-func (c *v5LazyPacketConn) SetDeadline(deadline time.Time) error {
+func (c *quicProxyLazyPacketConn) SetDeadline(deadline time.Time) error {
 	c.deadlineAccess.Lock()
 	select {
 	case <-c.initDone:
@@ -626,7 +628,7 @@ func (c *v5LazyPacketConn) SetDeadline(deadline time.Time) error {
 	return nil
 }
 
-func (c *v5LazyPacketConn) SetReadDeadline(deadline time.Time) error {
+func (c *quicProxyLazyPacketConn) SetReadDeadline(deadline time.Time) error {
 	c.deadlineAccess.Lock()
 	select {
 	case <-c.initDone:
@@ -644,7 +646,7 @@ func (c *v5LazyPacketConn) SetReadDeadline(deadline time.Time) error {
 	return nil
 }
 
-func (c *v5LazyPacketConn) SetWriteDeadline(deadline time.Time) error {
+func (c *quicProxyLazyPacketConn) SetWriteDeadline(deadline time.Time) error {
 	c.deadlineAccess.Lock()
 	select {
 	case <-c.initDone:
