@@ -156,6 +156,10 @@ type V2RayXHTTPBaseOptions struct {
 	UplinkDataPlacement  string                     `json:"uplink_data_placement,omitempty"`
 	UplinkDataKey        string                     `json:"uplink_data_key,omitempty"`
 	UplinkChunkSize      *Xbadoption.Range          `json:"uplink_chunk_size,omitempty"`
+	SessionIDTable       string                     `json:"session_id_table,omitempty"`
+	SessionIDLength      Xbadoption.Range           `json:"session_id_length,omitempty"`
+	CongestionController string                     `json:"congestion_controller,omitempty"`
+	CWND                 int                        `json:"cwnd,omitempty"`
 }
 
 type _V2RayXHTTPOptions struct {
@@ -302,6 +306,9 @@ func checkV2RayXHTTPBaseOptions(mode string, options *V2RayXHTTPBaseOptions) err
 	}
 	if options.ServerMaxHeaderBytes < 0 {
 		return E.New("invalid negative value of maxHeaderBytes")
+	}
+	if mode != "stream-one" && mode != "stream-up" && options.GetNormalizedScMaxEachPostBytes().From <= 0 {
+		return E.New("`scMaxEachPostBytes` should be bigger than 0")
 	}
 	if options.Xmux != nil && options.Xmux.MaxConnections.To > 0 && options.Xmux.MaxConcurrency.To > 0 {
 		return E.New("max_connections cannot be specified together with max_concurrency")

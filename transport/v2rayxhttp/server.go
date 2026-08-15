@@ -18,6 +18,8 @@ import (
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/quic-go/http3"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/congestion"
+	"github.com/sagernet/sing-box/common/kmutex"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/xray/buf"
 	xnet "github.com/sagernet/sing-box/common/xray/net"
@@ -31,6 +33,7 @@ import (
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/ntp"
 	aTLS "github.com/sagernet/sing/common/tls"
 	sHttp "github.com/sagernet/sing/protocol/http"
 )
@@ -49,10 +52,8 @@ type Server struct {
 	options     *option.V2RayXHTTPOptions
 	host        string
 	path        string
-	sessionMu   sync.Mutex
+	sessionMu   *kmutex.Kmutex[string]
 	sessions    sync.Map
-	enableTCP   bool
-	enableH3    bool
 }
 
 func NewServer(ctx context.Context, logger logger.ContextLogger, options option.V2RayXHTTPOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (*Server, error) {
@@ -69,25 +70,9 @@ func NewServer(ctx context.Context, logger logger.ContextLogger, options option.
 		options:   &options,
 		host:      options.Host,
 		path:      options.GetNormalizedPath(),
+		sessionMu: kmutex.New[string](),
 	}
-	hasNonH3 := true
-	if tlsConfig != nil {
-		hasNonH3 = false
-		for _, proto := range tlsConfig.NextProtos() {
-			if proto == "h3" {
-				server.enableH3 = true
-			} else if proto != "" {
-				hasNonH3 = true
-			}
-		}
-		if len(tlsConfig.NextProtos()) == 0 {
-			hasNonH3 = true
-		}
-	} else {
-		server.enableH3 = false
-	}
-	server.enableTCP = hasNonH3
-	if server.enableTCP {
+	if server.network() == N.NetworkTCP {
 		protocols := new(http.Protocols)
 		protocols.SetHTTP1(true)
 		protocols.SetUnencryptedHTTP2(true)
@@ -103,13 +88,22 @@ func NewServer(ctx context.Context, logger logger.ContextLogger, options option.
 				return log.ContextWithNewID(ctx)
 			},
 		}
-	}
-	if server.enableH3 {
+	} else {
+		congestionControlFactory, err := congestion.NewCongestionControl(options.CongestionController, options.CWND, ntp.TimeFuncFromContext(ctx))
+		if err != nil {
+			return nil, err
+		}
 		server.quicConfig = &quic.Config{
 			DisablePathMTUDiscovery: !C.IsLinux && !C.IsWindows,
 		}
 		server.http3Server = &http3.Server{
 			Handler: server,
+			ConnContext: func(ctx context.Context, conn quic.Connection) context.Context {
+				if congestionControlFactory != nil {
+					conn.SetCongestionControl(congestionControlFactory(conn))
+				}
+				return log.ContextWithNewID(ctx)
+			},
 		}
 	}
 	return server, nil
@@ -155,10 +149,20 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	sessionId, seqStr := ExtractMetaFromRequest(s.options, request, s.path)
-	if sessionId == "" && s.options.Mode != "" && s.options.Mode != "auto" && s.options.Mode != "stream-one" && s.options.Mode != "stream-up" {
-		s.logger.ErrorContext(request.Context(), "stream-one mode is not allowed")
-		writer.WriteHeader(http.StatusBadRequest)
-		return
+	if s.options.Mode != "" && s.options.Mode != "auto" {
+		if sessionId == "" {
+			if s.options.Mode != "stream-one" && s.options.Mode != "stream-up" {
+				s.logger.ErrorContext(request.Context(), "stream-one mode is not allowed")
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		} else {
+			if s.options.Mode == "stream-one" {
+				s.logger.ErrorContext(request.Context(), "session is not allowed in stream-one mode")
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
 	}
 	var forwardedAddrs []xnet.Address
 	if len(s.options.TrustedXForwardedFor) > 0 {
@@ -222,7 +226,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				Reader: httpSC,
 			})
 			if err != nil {
-				s.logger.InfoContext(request.Context(), err, "failed to upload (PushReader)")
+				s.logger.DebugContext(request.Context(), err, "failed to upload (PushReader)")
 				writer.WriteHeader(http.StatusConflict)
 			} else {
 				writer.Header().Set("X-Accel-Buffering", "no")
@@ -232,12 +236,22 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				referrer := request.Header.Get("Referer")
 				if referrer != "" && scStreamUpServerSecs.To > 0 {
 					go func() {
+						timer := time.NewTimer(0)
+						if !timer.Stop() {
+							<-timer.C
+						}
+						defer timer.Stop()
 						for {
 							_, err := httpSC.Write(bytes.Repeat([]byte{'X'}, int(s.options.GetNormalizedXPaddingBytes().Rand())))
 							if err != nil {
-								break
+								return
 							}
-							time.Sleep(time.Duration(scStreamUpServerSecs.Rand()) * time.Second)
+							timer.Reset(time.Duration(scStreamUpServerSecs.Rand()) * time.Second)
+							select {
+							case <-timer.C:
+							case <-httpSC.Wait():
+								return
+							}
 						}
 					}()
 				}
@@ -267,7 +281,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			headerPayloadEncoded := strings.Join(headerPayloadChunks, "")
 			headerPayload, err = base64.RawURLEncoding.DecodeString(headerPayloadEncoded)
 			if err != nil {
-				s.logger.InfoContext(request.Context(), err, "Invalid base64 in header's payload")
+				s.logger.DebugContext(request.Context(), err, "Invalid base64 in header's payload")
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -286,7 +300,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			cookiePayloadEncoded := strings.Join(cookiePayloadChunks, "")
 			cookiePayload, err = base64.RawURLEncoding.DecodeString(cookiePayloadEncoded)
 			if err != nil {
-				s.logger.InfoContext(request.Context(), err, "Invalid base64 in cookies' payload")
+				s.logger.DebugContext(request.Context(), err, "Invalid base64 in cookies' payload")
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -306,7 +320,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				bodyPayload, readErr = buf.ReadAllToBytes(io.LimitReader(request.Body, int64(scMaxEachPostBytes)+1))
 			}
 			if readErr != nil {
-				s.logger.InfoContext(request.Context(), readErr, "failed to read body payload")
+				s.logger.DebugContext(request.Context(), readErr, "failed to read body payload")
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -329,7 +343,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		seq, err := strconv.ParseUint(seqStr, 10, 64)
 		if err != nil {
-			s.logger.InfoContext(request.Context(), err, "failed to upload (ParseUint)")
+			s.logger.DebugContext(request.Context(), err, "failed to upload (ParseUint)")
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -338,7 +352,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			Seq:     seq,
 		})
 		if err != nil {
-			s.logger.InfoContext(request.Context(), err, "failed to upload (PushPayload)")
+			s.logger.DebugContext(request.Context(), err, "failed to upload (PushPayload)")
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -349,7 +363,11 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	} else if request.Method == "GET" || sessionId == "" {
 		if sessionId != "" {
 			currentSession.isFullyConnected.Close()
-			defer s.sessions.Delete(sessionId)
+			defer func() {
+				s.sessionMu.Lock(sessionId)
+				defer s.sessionMu.Unlock(sessionId)
+				s.sessions.Delete(sessionId)
+			}()
 		}
 		writer.Header().Set("X-Accel-Buffering", "no")
 		writer.Header().Set("Cache-Control", "no-store")
@@ -385,58 +403,50 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) Network() []string {
-	var networks []string
-	if s.enableTCP {
-		networks = append(networks, N.NetworkTCP)
-	}
-	if s.enableH3 {
-		networks = append(networks, N.NetworkUDP)
-	}
-	return networks
+	return []string{s.network()}
 }
 
 func (s *Server) Serve(listener net.Listener) error {
-	if !s.enableTCP {
-		return os.ErrInvalid
+	if s.network() == N.NetworkTCP {
+		if s.tlsConfig != nil {
+			listener = aTLS.NewListener(listener, s.tlsConfig)
+		}
+		s.localAddr = listener.Addr()
+		return s.httpServer.Serve(listener)
 	}
-	if s.tlsConfig != nil {
-		listener = aTLS.NewListener(listener, s.tlsConfig)
-	}
-	s.localAddr = listener.Addr()
-	return s.httpServer.Serve(listener)
+	return os.ErrInvalid
 }
 
 func (s *Server) ServePacket(listener net.PacketConn) error {
-	if !s.enableH3 {
-		return os.ErrInvalid
+	if s.network() == N.NetworkUDP {
+		quicListener, err := qtls.ListenEarly(listener, s.tlsConfig, s.quicConfig)
+		if err != nil {
+			return err
+		}
+		s.localAddr = quicListener.Addr()
+		return s.http3Server.ServeListener(quicListener)
 	}
-	quicListener, err := qtls.ListenEarly(listener, s.tlsConfig, s.quicConfig)
-	if err != nil {
-		return err
-	}
-	s.localAddr = quicListener.Addr()
-	return s.http3Server.ServeListener(quicListener)
+	return os.ErrInvalid
 }
 
 func (s *Server) Close() error {
-	var closers []any
-	if s.enableTCP {
-		closers = append(closers, s.httpServer)
+	if s.network() == N.NetworkTCP {
+		return common.Close(s.httpServer)
 	}
-	if s.enableH3 {
-		closers = append(closers, s.http3Server)
+	return common.Close(s.http3Server)
+}
+
+func (s *Server) network() string {
+	if s.tlsConfig != nil && len(s.tlsConfig.NextProtos()) == 1 && s.tlsConfig.NextProtos()[0] == "h3" {
+		return N.NetworkUDP
 	}
-	return common.Close(closers...)
+	return N.NetworkTCP
 }
 
 func (s *Server) upsertSession(sessionId string) *httpSession {
+	s.sessionMu.Lock(sessionId)
+	defer s.sessionMu.Unlock(sessionId)
 	currentSessionAny, ok := s.sessions.Load(sessionId)
-	if ok {
-		return currentSessionAny.(*httpSession)
-	}
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	currentSessionAny, ok = s.sessions.Load(sessionId)
 	if ok {
 		return currentSessionAny.(*httpSession)
 	}
@@ -445,15 +455,16 @@ func (s *Server) upsertSession(sessionId string) *httpSession {
 		isFullyConnected: done.New(),
 	}
 	s.sessions.Store(sessionId, session)
-	shouldReap := done.New()
 	go func() {
-		time.Sleep(30 * time.Second)
-		shouldReap.Close()
-	}()
-	go func() {
+		reapTimer := time.NewTimer(30 * time.Second)
+		defer reapTimer.Stop()
 		select {
-		case <-shouldReap.Wait():
-			s.sessions.Delete(sessionId)
+		case <-reapTimer.C:
+			s.sessionMu.Lock(sessionId)
+			if current, ok := s.sessions.Load(sessionId); ok && current.(*httpSession) == session {
+				s.sessions.Delete(sessionId)
+			}
+			s.sessionMu.Unlock(sessionId)
 			session.uploadQueue.Close()
 		case <-session.isFullyConnected.Wait():
 		}

@@ -18,13 +18,13 @@ import (
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/quic-go/http3"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/congestion"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/vision"
 	"github.com/sagernet/sing-box/common/xray/buf"
 	xrnet "github.com/sagernet/sing-box/common/xray/net"
 	"github.com/sagernet/sing-box/common/xray/pipe"
 	"github.com/sagernet/sing-box/common/xray/signal/done"
-	"github.com/sagernet/sing-box/common/xray/uuid"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	qtls "github.com/sagernet/sing-quic"
@@ -33,6 +33,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/ntp"
 	sHTTP "github.com/sagernet/sing/protocol/http"
 	"github.com/sagernet/sing/service"
 	"golang.org/x/net/http2"
@@ -48,6 +49,8 @@ type Client struct {
 	baseRequestURL2 url.URL
 	getHTTPClient   func() (DialerClient, *XmuxClient)
 	getHTTPClient2  func() (DialerClient, *XmuxClient)
+	xmuxManager     *XmuxManager
+	xmuxManager2    *XmuxManager
 }
 
 func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayXHTTPOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
@@ -77,6 +80,19 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		}
 	}
 	options.Mode = mode
+	// force h2 by default for standard TLS; skipped for reality, where the
+	// uTLS fingerprint's default ALPN (h2, http/1.1) must be preserved
+	if tlsConfig != nil && !isRealityConfig(tlsConfig) && len(tlsConfig.NextProtos()) == 0 {
+		tlsConfig.SetNextProtos([]string{"h2"})
+	}
+	if _, err := congestion.NewCongestionControl(options.CongestionController, options.CWND, nil); err != nil {
+		return nil, err
+	}
+	if options.Download != nil {
+		if _, err := congestion.NewCongestionControl(options.Download.CongestionController, options.Download.CWND, nil); err != nil {
+			return nil, err
+		}
+	}
 	baseRequestURL, err := getBaseRequestURL(
 		&options.V2RayXHTTPBaseOptions, dest, tlsConfig,
 	)
@@ -91,7 +107,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		}
 	}
 	xmuxManager := NewXmuxManager(xmuxOptions, func() XmuxConn {
-		return createHTTPClient(dest, dialer, &options.V2RayXHTTPBaseOptions, tlsConfig)
+		return createHTTPClient(ctx, dest, dialer, &options.V2RayXHTTPBaseOptions, tlsConfig)
 	})
 	getHTTPClient := func() (DialerClient, *XmuxClient) {
 		xmuxClient := xmuxManager.GetXmuxClient(ctx)
@@ -100,6 +116,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	baseRequestURL2 := baseRequestURL
 	getHTTPClient2 := getHTTPClient
 	var downloadDest *M.Socksaddr
+	var xmuxManager2 *XmuxManager
 	var clientLogger log.ContextLogger
 	if l := service.FromContext[log.ContextLogger](ctx); l != nil {
 		clientLogger = l
@@ -123,6 +140,9 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 				return nil, err
 			}
 		}
+		if tlsConfig2 != nil && !isRealityConfig(tlsConfig2) && len(tlsConfig2.NextProtos()) == 0 {
+			tlsConfig2.SetNextProtos([]string{"h2"})
+		}
 		baseRequestURL2, err = getBaseRequestURL(&options2.V2RayXHTTPBaseOptions, dest2, tlsConfig2)
 		if err != nil {
 			return nil, err
@@ -134,8 +154,8 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 				return nil, err
 			}
 		}
-		xmuxManager2 := NewXmuxManager(xmuxOptions2, func() XmuxConn {
-			return createHTTPClient(dest2, dialer2, &options2.V2RayXHTTPBaseOptions, tlsConfig2)
+		xmuxManager2 = NewXmuxManager(xmuxOptions2, func() XmuxConn {
+			return createHTTPClient(ctx, dest2, dialer2, &options2.V2RayXHTTPBaseOptions, tlsConfig2)
 		})
 		getHTTPClient2 = func() (DialerClient, *XmuxClient) {
 			xmuxClient2 := xmuxManager2.GetXmuxClient(ctx)
@@ -152,6 +172,8 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		getHTTPClient2:  getHTTPClient2,
 		baseRequestURL:  baseRequestURL,
 		baseRequestURL2: baseRequestURL2,
+		xmuxManager:     xmuxManager,
+		xmuxManager2:    xmuxManager2,
 	}, nil
 }
 
@@ -160,8 +182,7 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 	mode := c.options.Mode
 	sessionId := ""
 	if c.options.Mode != "stream-one" {
-		sessionIdUuid := uuid.New()
-		sessionId = sessionIdUuid.String()
+		sessionId = GenerateSessionID(&c.options.V2RayXHTTPBaseOptions)
 	}
 	requestURL := c.baseRequestURL
 	requestURL2 := c.baseRequestURL2
@@ -240,9 +261,6 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 	}
 	scMaxEachPostBytes := options.GetNormalizedScMaxEachPostBytes()
 	scMinPostsIntervalMs := options.GetNormalizedScMinPostsIntervalMs()
-	if scMaxEachPostBytes.From <= 0 {
-		panic("`scMaxEachPostBytes` should be bigger than 0")
-	}
 	maxUploadSize := scMaxEachPostBytes.Rand()
 	uploadPipeReader, uploadPipeWriter := pipe.New(pipe.WithSizeLimit(max(0, maxUploadSize-buf.Size)))
 	conn.writer = uploadWriter{
@@ -324,6 +342,10 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 }
 
 func (c *Client) Close() error {
+	c.xmuxManager.Close()
+	if c.xmuxManager2 != nil {
+		c.xmuxManager2.Close()
+	}
 	return nil
 }
 
@@ -400,7 +422,7 @@ func formatDestWithNetwork(client DialerClient, dest M.Socksaddr) string {
 	return network + ":" + dest.String()
 }
 
-func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXHTTPBaseOptions, tlsConfig tls.Config) DialerClient {
+func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXHTTPBaseOptions, tlsConfig tls.Config) DialerClient {
 	httpVersion := decideHTTPVersion(tlsConfig)
 	dialContext := func(ctxInner context.Context) (net.Conn, error) {
 		conn, err := dialer.DialContext(ctxInner, N.NetworkTCP, dest)
@@ -433,6 +455,7 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 		if keepAlivePeriod < 0 {
 			keepAlivePeriod = 0
 		}
+		congestionControlFactory, _ := congestion.NewCongestionControl(options.CongestionController, options.CWND, ntp.TimeFuncFromContext(ctx))
 		quicConfig := &quic.Config{
 			MaxIdleTimeout: xrnet.ConnIdleTimeout,
 			// these two are defaults of quic-go/http3. the default of quic-go (no
@@ -448,7 +471,15 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 				if dErr != nil {
 					return nil, dErr
 				}
-				return qtls.DialEarly(ctx, bufio.NewUnbindPacketConn(udpConn), udpConn.RemoteAddr(), tlsConfig, cfg)
+				conn, dErr := qtls.DialEarly(ctx, bufio.NewUnbindPacketConn(udpConn), udpConn.RemoteAddr(), tlsConfig, cfg)
+				if dErr != nil {
+					_ = udpConn.Close()
+					return nil, dErr
+				}
+				if congestionControlFactory != nil {
+					conn.SetCongestionControl(congestionControlFactory(conn))
+				}
+				return conn, nil
 			},
 		}
 	case "2":
