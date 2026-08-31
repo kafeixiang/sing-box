@@ -15,6 +15,7 @@
 
   "system": false,
   "name": "",
+  "gso": false,
   "mtu": 1408,
   "address": [],
   "private_key": "",
@@ -34,6 +35,7 @@
   ... // UDP NAT 字段
 
   "workers": 0,
+  "inner_domain_resolver": "", // 或 {}
 
   ... // 拨号字段
 }
@@ -54,6 +56,16 @@
 #### name
 
 为系统接口自定义设备名称。
+
+#### gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试启用通用分段卸载。
+
+当 `system` 为 true 时，默认启用。
 
 #### mtu
 
@@ -131,6 +143,16 @@ WireGuard worker 数量。
 ### UDP NAT 字段
 
 参阅 [UDP NAT 字段](/zh/configuration/shared/udp-nat/)。
+
+#### inner_domain_resolver
+
+设置用于解析通过 WireGuard 隊道的连接的域名解析器。
+
+当此端点被选中用于 L3 转发时，它也用于解析尚未解析的域名目标。
+
+此选项与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 格式相同。
+
+未设置时使用默认DNS。
 
 ### 拨号字段
 

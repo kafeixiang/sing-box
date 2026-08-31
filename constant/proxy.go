@@ -2,11 +2,13 @@ package constant
 
 const (
 	TypeTun                = "tun"
+	TypeEBPF               = "ebpf"
 	TypeRedirect           = "redirect"
 	TypeTProxy             = "tproxy"
 	TypeDirect             = "direct"
 	TypeBridge             = "bridge"
 	TypeBlock              = "block"
+	TypePass               = "pass"
 	TypeDNS                = "dns"
 	TypeSOCKS              = "socks"
 	TypeHTTP               = "http"
@@ -43,17 +45,23 @@ const (
 	TypeHysteriaRealm      = "hysteria-realm"
 	TypeACME               = "acme"
 	TypeCloudflareOriginCA = "cloudflare-origin-ca"
+	TypeTrustTunnel        = "trusttunnel"
+
+	TypeJuicity = "juicity"
 )
 
 const (
-	TypeSelector = "selector"
-	TypeURLTest  = "urltest"
+	TypeSelector    = "selector"
+	TypeURLTest     = "urltest"
+	TypeLoadBalance = "loadbalance"
 )
 
 func ProxyDisplayName(proxyType string) string {
 	switch proxyType {
 	case TypeTun:
 		return "TUN"
+	case TypeEBPF:
+		return "eBPF"
 	case TypeRedirect:
 		return "Redirect"
 	case TypeTProxy:
@@ -64,6 +72,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "Bridge"
 	case TypeBlock:
 		return "Block"
+	case TypePass:
+		return "Pass"
 	case TypeDNS:
 		return "DNS"
 	case TypeSOCKS:
@@ -112,10 +122,16 @@ func ProxyDisplayName(proxyType string) string {
 		return "Tailscale"
 	case TypeCloudflared:
 		return "Cloudflared"
+	case TypeJuicity:
+		return "Juicity"
+	case TypeTrustTunnel:
+		return "TrustTunnel"
 	case TypeSelector:
 		return "Selector"
 	case TypeURLTest:
 		return "URLTest"
+	case TypeLoadBalance:
+		return "LoadBalance"
 	default:
 		return "Unknown"
 	}

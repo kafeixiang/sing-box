@@ -18,6 +18,7 @@ icon: material/new-box
   "idle_session_timeout": "30s",
   "min_idle_session": 5,
   "client_metadata": "",
+  "disable_reuse": false,
   "tls": {},
 
   ... // Dial Fields
@@ -61,6 +62,12 @@ In the check, at least the first `n` idle sessions are kept open. Default value:
 !!! question "Since sing-box 1.13.16"
 
 Check [AnyTLS client metadata](/manual/misc/anytls-client-metadata/).
+
+The built-in client metadata is used if not configured. An explicit empty string sends empty client metadata.
+
+#### disable_reuse
+
+Disable TLS connection reuse. Default: false.
 
 #### tls
 

@@ -275,7 +275,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		if err != nil {
 			return nil, E.Cause(err, "initialize auto-redirect")
 		}
-		if !C.IsAndroid {
+		if options.AutoRedirectDisableMarkMode && (len(inbound.routeRuleSet) > 0 || len(inbound.routeExcludeRuleSet) > 0) {
+			return nil, E.New("`auto_redirect` mark mode cannot be disabled with `route_address_set` or `route_exclude_address_set`")
+		}
+		if !C.IsAndroid && !options.AutoRedirectDisableMarkMode {
 			inbound.tunOptions.AutoRedirectMarkMode = true
 			if options.NetNs == "" {
 				err = networkManager.RegisterAutoRedirectOutputMark(inbound.tunOptions.AutoRedirectOutputMark)
@@ -593,7 +596,7 @@ func (t *autoRedirectHandler) NewConnectionEx(ctx context.Context, conn net.Conn
 	ctx = log.ContextWithNewID(ctx)
 	var metadata adapter.InboundContext
 	metadata.Inbound = t.tag
-	metadata.InboundType = C.TypeTun
+	metadata.InboundType = C.TypeRedirect
 	metadata.Source = source
 	metadata.Destination = destination
 	for _, dnsHijackAddress := range t.dnsHijackAddress {
