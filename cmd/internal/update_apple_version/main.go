@@ -48,9 +48,10 @@ func main() {
 	newContent := projectContent
 	var marketingVersionUpdated bool
 	if flagTestFlight {
-		newContent, marketingVersionUpdated = findAndReplace(objectsMap, newContent, []string{"io.nekohasekai.sfamt"}, build_shared.TestFlightVersion)
+		testFlightVersion := build_shared.TestFlightVersion(newVersion)
+		newContent, marketingVersionUpdated = findAndReplace(objectsMap, newContent, []string{"io.nekohasekai.sfamt"}, testFlightVersion)
 		if marketingVersionUpdated {
-			log.Info("updated App Store version to ", build_shared.TestFlightVersion)
+			log.Info("updated App Store version to ", testFlightVersion)
 		}
 	}
 	var standaloneVersionUpdated bool

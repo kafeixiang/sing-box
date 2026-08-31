@@ -88,7 +88,11 @@ func fetchNextProjectVersion(ctx context.Context, platformName string) error {
 		Limit:                           200,
 	}
 	if platform != asc.PlatformMACOS {
-		query.FilterPreReleaseVersionVersion = []string{build_shared.TestFlightVersion}
+		tagVersion, err := build_shared.ReadTagVersion()
+		if err != nil {
+			return err
+		}
+		query.FilterPreReleaseVersionVersion = []string{build_shared.TestFlightVersion(tagVersion)}
 	}
 
 	client := createClient(time.Minute)
