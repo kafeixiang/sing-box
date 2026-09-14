@@ -44,6 +44,8 @@ type DNSTransport struct {
 	defaultResolvers       []adapter.DNSTransport
 }
 
+var _ adapter.DNSTransportWithPreferredDomain = (*DNSTransport)(nil)
+
 type openConnectDNSRoute struct {
 	domain    string
 	resolvers []adapter.DNSTransport

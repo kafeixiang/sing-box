@@ -67,6 +67,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*Endpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*Endpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*Endpoint)(nil)
 	_ adapter.Referrer                    = (*Endpoint)(nil)
 	_ adapter.OnDemandEndpoint            = (*Endpoint)(nil)
@@ -133,6 +134,7 @@ type Endpoint struct {
 
 	systemInterface     bool
 	systemInterfaceName string
+	systemInterfaceGSO  bool
 	systemInterfaceMTU  uint32
 	keyAuth             bool
 	serverStarted       bool
@@ -140,6 +142,8 @@ type Endpoint struct {
 	systemTun           tun.Tun
 	systemDialer        *dialer.DefaultDialer
 	fallbackTCPCloser   func()
+
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TailscaleEndpointOptions) (adapter.Endpoint, error) {
@@ -182,6 +186,10 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	} else {
 		udpTimeout = C.UDPTimeout
 	}
+	gso := options.SystemInterface
+	if options.SystemInterfaceGSO != nil {
+		gso = *options.SystemInterfaceGSO
+	}
 	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context:          ctx,
 		Options:          options.DialerOptions,
@@ -200,7 +208,7 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	taildropDirectory = filemanager.BasePath(ctx, os.ExpandEnv(taildropDirectory))
 	taildropDirectory, _ = filepath.Abs(taildropDirectory)
-	return &Endpoint{
+	ep := &Endpoint{
 		Adapter:           endpoint.NewAdapter(C.TypeTailscale, tag, []string{N.NetworkTCP, N.NetworkUDP, N.NetworkICMP}, nil),
 		ctx:               ctx,
 		router:            router,
@@ -255,11 +263,20 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		udpTimeout:                 udpTimeout,
 		icmpTimeout:                C.ICMPTimeout,
 		systemInterface:            options.SystemInterface,
+		systemInterfaceGSO:         gso,
 		systemInterfaceName:        options.SystemInterfaceName,
 		systemInterfaceMTU:         options.SystemInterfaceMTU,
 		keyAuth:                    options.AuthKey != "",
 		onDemand:                   options.OnDemand,
-	}, nil
+	}
+	if options.InnerDomainResolver != nil {
+		innerDNSOpts, err := adapter.DNSQueryOptionsFrom(ctx, options.InnerDomainResolver)
+		if err != nil {
+			return nil, E.Cause(err, "inner domain resolver")
+		}
+		ep.innerDNSQueryOptions = innerDNSOpts
+	}
+	return ep, nil
 }
 
 func (t *Endpoint) References() []string {
@@ -330,7 +347,7 @@ func (t *Endpoint) start() error {
 		tunOptions := tun.Options{
 			Name:                      tunName,
 			MTU:                       mtu,
-			GSO:                       true,
+			GSO:                       t.systemInterfaceGSO,
 			InterfaceScope:            true,
 			InterfaceMonitor:          t.network.InterfaceMonitor(),
 			InterfaceFinder:           t.network.InterfaceFinder(),
@@ -364,27 +381,30 @@ func (t *Endpoint) start() error {
 		t.systemDialer = systemDialer
 		t.server.Tun = wgTunDevice
 	}
+	selfBypassControl := dialer.AppendEBPFSelfBypass(t.network, nil)
 	if t.network.AutoRedirectOutputMark() != 0 {
-		netns.SetControlFunc(t.network.AutoRedirectOutputMarkFunc())
+		netns.SetControlFunc(control.Append(t.network.AutoRedirectOutputMarkFunc(), selfBypassControl))
 	} else if t.platformInterface != nil && t.platformInterface.UsePlatformNetworkInterfaces() {
 		if t.platformInterface.UsePlatformAutoDetectInterfaceControl() {
-			netns.SetControlFunc(func(network, address string, conn syscall.RawConn) error {
+			platformControl := func(network, address string, conn syscall.RawConn) error {
 				return control.Raw(conn, func(fileDescriptor uintptr) error {
 					return t.platformInterface.AutoDetectInterfaceControl(int(fileDescriptor))
 				})
-			})
+			}
+			netns.SetControlFunc(control.Append(platformControl, selfBypassControl))
 		} else {
 			// NEPacketTunnelProvider sockets are excluded from tunnel routes by
 			// NECP; the empty override only suppresses tailscale's own
 			// default-interface bind, which would select the sing-box utun.
-			netns.SetControlFunc(func(string, string, syscall.RawConn) error {
+			platformControl := func(string, string, syscall.RawConn) error {
 				return nil
-			})
+			}
+			netns.SetControlFunc(control.Append(platformControl, selfBypassControl))
 		}
 	} else {
 		bindFunc := t.network.AutoDetectInterfaceFunc()
-		if bindFunc != nil {
-			netns.SetControlFunc(bindFunc)
+		if bindFunc != nil || selfBypassControl != nil {
+			netns.SetControlFunc(control.Append(bindFunc, selfBypassControl))
 			netns.SetListenPacketFunc(t.listenPacket)
 		}
 	}
@@ -393,7 +413,7 @@ func (t *Endpoint) start() error {
 
 func (t *Endpoint) listenPacket(ctx context.Context, network string, address string) (nettype.PacketConn, error) {
 	listenConfig := net.ListenConfig{
-		Control: control.Append(t.network.AutoDetectInterfaceFunc(), control.DisableUDPNetReset()),
+		Control: dialer.AppendEBPFSelfBypass(t.network, control.Append(t.network.AutoDetectInterfaceFunc(), control.DisableUDPNetReset())),
 	}
 	packetConn, err := listenConfig.ListenPacket(ctx, network, address)
 	if err != nil {
@@ -911,7 +931,7 @@ func (t *Endpoint) DialContext(ctx context.Context, network string, destination 
 		return nil, resumeErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, t.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -1004,7 +1024,7 @@ func (t *Endpoint) listenPacketWithAddress(ctx context.Context, destination M.So
 func (t *Endpoint) ListenPacketWithDestination(ctx context.Context, destination M.Socksaddr) (net.PacketConn, netip.Addr, error) {
 	t.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	if destination.IsDomain() {
-		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, t.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}
