@@ -141,6 +141,7 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		markFunc := networkManager.AutoRedirectOutputMarkFunc()
 		dialer.Control = control.Append(dialer.Control, markFunc)
 		listenConfig.Control = control.Append(listenConfig.Control, markFunc)
+		dialer.Control, listenConfig.Control = appendEBPFSelfBypass(networkManager, dialer.Control, listenConfig.Control)
 	}
 	if options.ReuseAddr {
 		listenConfig.Control = control.Append(listenConfig.Control, control.ReuseAddr())
@@ -179,10 +180,12 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		if keepInterval == 0 {
 			keepInterval = C.TCPKeepAliveInterval
 		}
+		keepCount := max(options.TCPKeepAliveCount, 0)
 		dialer.KeepAliveConfig = net.KeepAliveConfig{
 			Enable:   true,
 			Idle:     keepIdle,
 			Interval: keepInterval,
+			Count:    keepCount,
 		}
 	}
 	var udpFragment bool
