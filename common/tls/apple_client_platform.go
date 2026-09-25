@@ -57,6 +57,8 @@ func (c *appleClientConfig) ClientHandshake(ctx context.Context, conn net.Conn) 
 	serverName := c.serverName
 	serverNamePtr := cStringOrNil(serverName)
 	defer cFree(serverNamePtr)
+	certificateServerNamePtr := cStringOrNil(c.certificateServerName)
+	defer cFree(certificateServerNamePtr)
 
 	alpn := strings.Join(c.nextProtos, "\n")
 	alpnPtr := cStringOrNil(alpn)
@@ -84,6 +86,7 @@ func (c *appleClientConfig) ClientHandshake(ctx context.Context, conn net.Conn) 
 	client := C.box_apple_tls_client_create(
 		C.int(dupFD),
 		serverNamePtr,
+		certificateServerNamePtr,
 		alpnPtr,
 		C.size_t(len(alpn)),
 		C.uint16_t(c.minVersion),
@@ -129,6 +132,14 @@ func (c *appleClientConfig) ClientHandshake(ctx context.Context, conn net.Conn) 
 		C.box_apple_tls_client_cancel(client)
 		C.box_apple_tls_client_free(client)
 		return nil, err
+	}
+	if len(c.certificatePinSHA256) > 0 {
+		err = VerifyCertificatePinSHA256(c.certificatePinSHA256, c.verificationServerName(), c.timeFunc, connectionState.PeerCertificates)
+		if err != nil {
+			C.box_apple_tls_client_cancel(client)
+			C.box_apple_tls_client_free(client)
+			return nil, err
+		}
 	}
 	if len(c.certificateSHA256) > 0 || len(c.certificatePublicKeySHA256) > 0 {
 		err = VerifyPinnedCertificate(c.certificateSHA256, c.certificatePublicKeySHA256, rawCerts)

@@ -49,11 +49,13 @@ icon: material/new-box
 
 * `headers`
 * `tls.server_name`（必须与请求主机匹配）
+* `tls.certificate_server_name`
 * `tls.insecure`
 * `tls.min_version` / `tls.max_version`
 * `tls.certificate` / `tls.certificate_path`
 * `tls.certificate_sha256`
 * `tls.certificate_public_key_sha256`
+* `tls.certificate_pin_sha256`
 * 拨号字段
 
 不支持的字段：

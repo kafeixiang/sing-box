@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sagernet/sing-box/schema"
+	"github.com/sagernet/sing/common/auth"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json/badoption"
 )
@@ -13,6 +14,7 @@ import (
 type InboundTLSOptions struct {
 	Enabled                          bool                                `json:"enabled,omitempty"`
 	ServerName                       string                              `json:"server_name,omitempty"`
+	ServerNames                      badoption.Listable[string]          `json:"server_names,omitempty"`
 	Insecure                         bool                                `json:"insecure,omitempty"`
 	ALPN                             badoption.Listable[string]          `json:"alpn,omitempty" examples:"http/1.1,h2,h3"`
 	MinVersion                       string                              `json:"min_version,omitempty" enum:"1.0,1.1,1.2,1.3"`
@@ -37,7 +39,10 @@ type InboundTLSOptions struct {
 	ACME *InboundACMEOptions `json:"acme,omitempty" schema:"omit"`
 
 	ECH     *InboundECHOptions     `json:"ech,omitempty"`
+	JLS     *InboundJLSOptions     `json:"jls,omitempty"`
 	Reality *InboundRealityOptions `json:"reality,omitempty"`
+
+	RejectUnknownSNI bool `json:"reject_unknown_sni,omitempty"`
 }
 
 type ClientAuthType tls.ClientAuthType
@@ -110,6 +115,7 @@ type OutboundTLSOptions struct {
 	Engine                     string                              `json:"engine,omitempty" enum:"go,apple,windows"`
 	DisableSNI                 bool                                `json:"disable_sni,omitempty"`
 	ServerName                 string                              `json:"server_name,omitempty"`
+	CertificateServerName      string                              `json:"certificate_server_name,omitempty"`
 	Insecure                   bool                                `json:"insecure,omitempty"`
 	ALPN                       badoption.Listable[string]          `json:"alpn,omitempty" examples:"http/1.1,h2,h3"`
 	MinVersion                 string                              `json:"min_version,omitempty" enum:"1.0,1.1,1.2,1.3"`
@@ -120,6 +126,7 @@ type OutboundTLSOptions struct {
 	CertificatePath            string                              `json:"certificate_path,omitempty"`
 	CertificateSHA256          badoption.Listable[[]byte]          `json:"certificate_sha256,omitempty"`
 	CertificatePublicKeySHA256 badoption.Listable[[]byte]          `json:"certificate_public_key_sha256,omitempty"`
+	CertificatePinSHA256       string                              `json:"certificate_pin_sha256,omitempty"`
 	ClientCertificate          badoption.Listable[string]          `json:"client_certificate,omitempty"`
 	ClientCertificatePath      string                              `json:"client_certificate_path,omitempty"`
 	ClientKey                  badoption.Listable[string]          `json:"client_key,omitempty"`
@@ -134,6 +141,7 @@ type OutboundTLSOptions struct {
 	HandshakeTimeout           badoption.Duration                  `json:"handshake_timeout,omitempty"`
 	ECH                        *OutboundECHOptions                 `json:"ech,omitempty"`
 	UTLS                       *OutboundUTLSOptions                `json:"utls,omitempty"`
+	JLS                        *OutboundJLSOptions                 `json:"jls,omitempty"`
 	Reality                    *OutboundRealityOptions             `json:"reality,omitempty"`
 }
 
@@ -218,6 +226,17 @@ type InboundRealityOptions struct {
 	MaxTimeDifference badoption.Duration             `json:"max_time_difference,omitempty"`
 }
 
+type InboundJLSOptions struct {
+	Enabled  bool                      `json:"enabled,omitempty"`
+	Users    []auth.User               `json:"users,omitempty"`
+	Fallback InboundJLSFallbackOptions `json:"fallback,omitempty"`
+}
+
+type InboundJLSFallbackOptions struct {
+	ServerOptions
+	DialerOptions
+}
+
 type InboundRealityHandshakeOptions struct {
 	ServerOptions
 	DialerOptions
@@ -249,6 +268,12 @@ type OutboundECHOptions struct {
 type OutboundUTLSOptions struct {
 	Enabled     bool   `json:"enabled,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty" enum:"chrome_psk,chrome_psk_shuffle,chrome_padding_psk_shuffle,chrome_pq,chrome_pq_psk,chrome,firefox,edge,safari,360,qq,ios,android,random,randomized"`
+}
+
+type OutboundJLSOptions struct {
+	Enabled  bool   `json:"enabled,omitempty"`
+	Password string `json:"password,omitempty"`
+	IV       string `json:"iv,omitempty"`
 }
 
 type OutboundRealityOptions struct {

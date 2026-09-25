@@ -20,16 +20,22 @@ import (
 )
 
 var (
-	bucketSelected = []byte("selected")
-	bucketExpand   = []byte("group_expand")
-	bucketMode     = []byte("clash_mode")
-	bucketRuleSet  = []byte("rule_set")
+	bucketSelected         = []byte("selected")
+	bucketExpand           = []byte("group_expand")
+	bucketMode             = []byte("clash_mode")
+	bucketRuleSet          = []byte("rule_set")
+	bucketExternalUI       = []byte("external_ui")
+	bucketBranch           = []byte("ref1nd")
+	bucketOutboundProvider = []byte("outbound_provider")
+	bucketStorage          = []byte("storage")
 
 	bucketNameList = []string{
 		string(bucketSelected),
 		string(bucketExpand),
 		string(bucketMode),
 		string(bucketRuleSet),
+		string(bucketExternalUI),
+		string(bucketBranch),
 		string(bucketRDRC),
 		string(bucketDNSCache),
 	}
@@ -214,11 +220,7 @@ func (c *CacheFile) start() error {
 	if err != nil {
 		return err
 	}
-	err = filemanager.Chown(c.ctx, c.path)
-	if err != nil {
-		db.Close()
-		return E.Cause(err, "platform chown")
-	}
+	_ = filemanager.Chown(c.ctx, c.path)
 	err = db.Batch(func(tx *bbolt.Tx) error {
 		return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
 			if name[0] == 0 {
@@ -397,6 +399,24 @@ func (c *CacheFile) createBucket(t *bbolt.Tx, key []byte) (*bbolt.Bucket, error)
 	return bucket.CreateBucketIfNotExists(key)
 }
 
+// branchBucket returns a bucket owned by this branch, nested in bucketBranch
+// so that its name cannot collide with upstream buckets.
+func (c *CacheFile) branchBucket(t *bbolt.Tx, key []byte) *bbolt.Bucket {
+	namespace := c.bucket(t, bucketBranch)
+	if namespace == nil {
+		return nil
+	}
+	return namespace.Bucket(key)
+}
+
+func (c *CacheFile) createBranchBucket(t *bbolt.Tx, key []byte) (*bbolt.Bucket, error) {
+	namespace, err := c.createBucket(t, bucketBranch)
+	if err != nil {
+		return nil, err
+	}
+	return namespace.CreateBucketIfNotExists(key)
+}
+
 func (c *CacheFile) LoadSelected(group string) string {
 	var selected string
 	c.view(func(t *bbolt.Tx) error {
@@ -454,9 +474,17 @@ func (c *CacheFile) StoreGroupExpand(group string, isExpand bool) error {
 }
 
 func (c *CacheFile) LoadRuleSet(tag string) *adapter.SavedBinary {
+	return c.loadBranchBinary(bucketRuleSet, tag, true)
+}
+
+func (c *CacheFile) SaveRuleSet(tag string, set *adapter.SavedBinary) error {
+	return c.saveBranchBinary(bucketRuleSet, tag, set)
+}
+
+func (c *CacheFile) LoadExternalUI(tag string) *adapter.SavedBinary {
 	var savedSet adapter.SavedBinary
 	err := c.view(func(t *bbolt.Tx) error {
-		bucket := c.bucket(t, bucketRuleSet)
+		bucket := c.bucket(t, bucketExternalUI)
 		if bucket == nil {
 			return os.ErrNotExist
 		}
@@ -472,16 +500,24 @@ func (c *CacheFile) LoadRuleSet(tag string) *adapter.SavedBinary {
 	return &savedSet
 }
 
-func (c *CacheFile) SaveRuleSet(tag string, set *adapter.SavedBinary) error {
+func (c *CacheFile) SaveExternalUI(tag string, info *adapter.SavedBinary) error {
 	return c.batch(func(t *bbolt.Tx) error {
-		bucket, err := c.createBucket(t, bucketRuleSet)
+		bucket, err := c.createBucket(t, bucketExternalUI)
 		if err != nil {
 			return err
 		}
-		setBinary, err := set.MarshalBinary()
+		setBinary, err := info.MarshalBinary()
 		if err != nil {
 			return err
 		}
 		return bucket.Put([]byte(tag), setBinary)
 	})
+}
+
+func (c *CacheFile) LoadSubscription(tag string) *adapter.SavedBinary {
+	return c.loadBranchBinary(bucketOutboundProvider, tag, false)
+}
+
+func (c *CacheFile) SaveSubscription(tag string, sub *adapter.SavedBinary) error {
+	return c.saveBranchBinary(bucketOutboundProvider, tag, sub)
 }

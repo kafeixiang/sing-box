@@ -69,15 +69,25 @@ func NewReferenceManager(ctx context.Context, logger log.ContextLogger, options 
 }
 
 func appendDomainResolver(transports []string, rawOptions any) []string {
+	var domainResolver *option.DomainResolveOptions
+	domainResolverOptionsWrapper, isDomainResolverOptionsWrapper := rawOptions.(option.DomainResolverOptionsWrapper)
 	dialerOptionsWrapper, isDialerOptionsWrapper := rawOptions.(option.DialerOptionsWrapper)
-	if !isDialerOptionsWrapper {
-		return transports
+	if isDomainResolverOptionsWrapper {
+		domainResolver = domainResolverOptionsWrapper.TakeDomainResolverOptions()
+	} else if isDialerOptionsWrapper {
+		domainResolver = dialerOptionsWrapper.TakeDialerOptions().DomainResolver
 	}
-	dialerOptions := dialerOptionsWrapper.TakeDialerOptions()
-	if dialerOptions.DomainResolver == nil || dialerOptions.DomainResolver.Server == "" {
-		return transports
+	if domainResolver != nil && domainResolver.Server != "" {
+		transports = append(transports, domainResolver.Server)
 	}
-	return append(transports, dialerOptions.DomainResolver.Server)
+	innerDomainResolverOptionsWrapper, isInnerDomainResolverOptionsWrapper := rawOptions.(option.InnerDomainResolverOptionsWrapper)
+	if isInnerDomainResolverOptionsWrapper {
+		innerDomainResolver := innerDomainResolverOptionsWrapper.TakeInnerDomainResolverOptions()
+		if innerDomainResolver != nil && innerDomainResolver.Server != "" {
+			transports = append(transports, innerDomainResolver.Server)
+		}
+	}
+	return transports
 }
 
 func (m *ReferenceManager) Name() string {
@@ -155,16 +165,26 @@ func (m *ReferenceManager) update() {
 	networkManager := service.FromContext[adapter.NetworkManager](m.ctx)
 	httpClientManager := service.FromContext[adapter.HTTPClientManager](m.ctx)
 
+	// Runtime rules retain configuration order. Disabled rules must not shadow
+	// later rules or the default outbound/transport during reference collection.
+	rules := m.rules
+	if router := service.FromContext[adapter.Router](m.ctx); router != nil {
+		rules = enabledRuleOptions(rules, router.Rules())
+	}
+	dnsRules := m.dnsRules
+	if router := service.FromContext[adapter.DNSRouter](m.ctx); router != nil {
+		dnsRules = enabledRuleOptions(dnsRules, router.Rules())
+	}
 	transportQueue := slices.Clone(m.staticTransports)
 	outboundQueue := slices.Clone(m.staticOutbounds)
-	if !collectDNSRuleReferences(m.dnsRules, mode, &transportQueue) {
+	if !collectDNSRuleReferences(dnsRules, mode, &transportQueue) {
 		defaultTransport := transportManager.Default()
 		if defaultTransport != nil {
 			transportQueue = append(transportQueue, defaultTransport.Tag())
 		}
 	}
 	transportQueue = append(transportQueue, networkManager.DefaultOptions().DomainResolver)
-	if !collectRuleReferences(m.rules, mode, &outboundQueue, &transportQueue) {
+	if !collectRuleReferences(rules, mode, outboundManager, &outboundQueue, &transportQueue) {
 		defaultOutbound := outboundManager.Default()
 		if defaultOutbound != nil {
 			outboundQueue = append(outboundQueue, defaultOutbound.Tag())
@@ -339,4 +359,18 @@ func (m *ReferenceManager) CloseIdleConnections() {
 			keeper.CloseIdleConnections()
 		}
 	}
+}
+
+// Fall back to all configured rules until runtime initialization is complete.
+func enabledRuleOptions[O any, R adapter.Rule](options []O, runtime []R) []O {
+	if len(options) != len(runtime) {
+		return options
+	}
+	enabled := make([]O, 0, len(options))
+	for i, rule := range runtime {
+		if !rule.Disabled() {
+			enabled = append(enabled, options[i])
+		}
+	}
+	return enabled
 }

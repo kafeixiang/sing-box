@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	_ adapter.FlowOutbound               = (*ServerEndpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver = (*ServerEndpoint)(nil)
 	_ dialer.PacketDialerWithDestination = (*ServerEndpoint)(nil)
 )
 
@@ -49,6 +49,8 @@ type ServerEndpoint struct {
 	localAddresses []netip.Prefix
 	started        atomic.Bool
 	readLoopDone   chan struct{}
+
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 type udpEgressPacketConn struct {
@@ -72,6 +74,10 @@ func (c *udpEgressPacketConn) WriteTo(buffer []byte, destination net.Addr) (int,
 }
 
 func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.OpenVPNServerEndpointOptions) (adapter.Endpoint, error) {
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	if options.MTU == 0 {
 		options.MTU = ovpntransport.DefaultMTU
 	}
@@ -89,6 +95,7 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		dnsRouter:      service.FromContext[adapter.DNSRouter](ctx),
 		localAddresses: options.Address,
 	}
+	serverEndpoint.innerDNSQueryOptions = innerDNSQueryOptions
 	serverOptions, err := buildServerOptions(options)
 	if err != nil {
 		cancelLoop()
@@ -105,10 +112,15 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 	if options.UDPTimeout != 0 {
 		udpTimeout = time.Duration(options.UDPTimeout)
 	}
+	gso := options.System
+	if options.GSO != nil {
+		gso = *options.GSO
+	}
 	serverEndpoint.deviceOptions = &device.Options{
 		Context:         ctx,
 		Logger:          logger,
 		System:          options.System,
+		GSO:             gso,
 		Handler:         serverEndpoint,
 		UDPTimeout:      udpTimeout,
 		ICMPTimeout:     C.ICMPTimeout,
@@ -209,7 +221,7 @@ func (s *ServerEndpoint) Start(stage adapter.StartStage) error {
 		if err == nil {
 			tuneOpenVPNUDPSocket(packetConn)
 			if egressEnabled {
-				udpConn := packetConn.(*net.UDPConn)
+				udpConn := s.listener.UDPConn()
 				networkManager := service.FromContext[adapter.NetworkManager](s.ctx)
 				egressPool := tun.NewUDPEgressPool(tun.UDPEgressPoolOptions{
 					Logger:           s.logger,
@@ -655,6 +667,10 @@ func (s *ServerEndpoint) PreMatchFlow(network string, destination netip.Addr) ad
 	return adapter.PreMatchFlow
 }
 
+func (s *ServerEndpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return s.innerDNSQueryOptions
+}
+
 func (s *ServerEndpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return s.device.PortAddresses()
 }
@@ -740,7 +756,7 @@ func (s *ServerEndpoint) DialContext(ctx context.Context, network string, destin
 		return nil, E.New("endpoint is not ready yet")
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, s.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -758,7 +774,7 @@ func (s *ServerEndpoint) ListenPacketWithDestination(ctx context.Context, destin
 		return nil, netip.Addr{}, E.New("endpoint is not ready yet")
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, s.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

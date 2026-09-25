@@ -8,12 +8,16 @@ import (
 
 type HeadlessRule interface {
 	Match(metadata *InboundContext) bool
+	RuleCount() uint64
 	String() string
 }
 
 type Rule interface {
 	HeadlessRule
 	SimpleLifecycle
+	Disabled() bool
+	UUID() string
+	ChangeStatus()
 	Type() string
 	Action() RuleAction
 }
@@ -36,7 +40,7 @@ type RuleAction interface {
 
 func IsFinalAction(action RuleAction) bool {
 	switch action.Type() {
-	case C.RuleActionTypeSniff, C.RuleActionTypeResolve, C.RuleActionTypeEvaluate:
+	case C.RuleActionTypeSniff, C.RuleActionTypeSniffOverrideDestination, C.RuleActionTypeResolve, C.RuleActionTypeEvaluate:
 		return false
 	default:
 		return true

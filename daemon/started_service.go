@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-const APIVersion = 4
+const APIVersion = 6
 
 const (
 	urlTestPushMinInterval = 250 * time.Millisecond
@@ -68,7 +68,7 @@ type StartedService struct {
 	logSubscriber           *observable.Subscriber[*log.Entry]
 	logObserver             *observable.Observer[*log.Entry]
 	instance                *Instance
-	startedAt               time.Time
+	startedAt               startTime
 	urlTestSubscriber       *observable.Subscriber[struct{}]
 	urlTestObserver         *observable.Observer[struct{}]
 	clashModeSubscriber     *observable.Subscriber[struct{}]
@@ -308,7 +308,7 @@ func (s *StartedService) StartOrReloadService(ctx context.Context, profileConten
 		runtimeDebug.FreeOSMemory()
 		return err
 	}
-	s.startedAt = time.Now()
+	s.startedAt.Mark()
 	s.updateStatus(ServiceStatus_STARTED)
 	s.serviceAccess.Unlock()
 	runtimeDebug.FreeOSMemory()
@@ -343,7 +343,7 @@ func (s *StartedService) CloseService() error {
 		_ = instance.Close()
 	}
 	s.serviceAccess.Lock()
-	s.startedAt = time.Time{}
+	s.startedAt.Reset()
 	s.updateStatus(ServiceStatus_IDLE)
 	s.serviceAccess.Unlock()
 	runtimeDebug.FreeOSMemory()
@@ -729,9 +729,12 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 	}
 	historyStorage := boxService.urlTestHistoryStorage
 	urlTest, isURLTest := outbound.(*group.URLTest)
+	loadBalance, isLoadBalance := outbound.(adapter.LoadBalanceGroup)
 	outboundGroup, isOutboundGroup := outbound.(adapter.OutboundGroup)
 	if isURLTest {
 		go urlTest.CheckOutbounds()
+	} else if isLoadBalance {
+		go loadBalance.URLTest(boxService.ctx)
 	} else if isOutboundGroup {
 		outbounds := common.FilterNotNil(common.Map(outboundGroup.All(), func(it string) adapter.Outbound {
 			itOutbound, _ := boxService.outboundManager.Outbound(it)
@@ -1072,7 +1075,7 @@ func buildConnectionProto(metadata *trafficcontrol.TrackerMetadata) *Connection 
 		Network:       metadata.Metadata.Network,
 		Source:        metadata.Metadata.Source.String(),
 		Destination:   metadata.Metadata.Destination.String(),
-		Domain:        metadata.Metadata.Domain,
+		Domain:        metadata.ConnectionDomain(),
 		Protocol:      metadata.Metadata.Protocol,
 		User:          metadata.Metadata.User,
 		FromOutbound:  metadata.Metadata.Outbound,
@@ -1148,9 +1151,11 @@ func (s *StartedService) GetDeprecatedWarnings(ctx context.Context, empty *empty
 }
 
 func (s *StartedService) GetStartedAt(ctx context.Context, empty *emptypb.Empty) (*StartedAt, error) {
-	s.serviceAccess.RLock()
-	defer s.serviceAccess.RUnlock()
-	return &StartedAt{StartedAt: s.startedAt.UnixMilli()}, nil
+	startedAt := s.startedAt.Get()
+	if startedAt.IsZero() {
+		return &StartedAt{}, nil
+	}
+	return &StartedAt{StartedAt: startedAt.UnixMilli()}, nil
 }
 
 func (s *StartedService) SubscribeOutbounds(_ *emptypb.Empty, server grpc.ServerStreamingServer[OutboundList]) error {

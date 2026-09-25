@@ -1,6 +1,7 @@
 package masque
 
 import (
+	"cmp"
 	"context"
 	"io"
 	"math"
@@ -36,7 +37,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*ServerEndpoint)(nil)
-	_ adapter.FlowOutbound                = (*ServerEndpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*ServerEndpoint)(nil)
 	_ adapter.ConnectionHandler           = (*serverConnectionHandler)(nil)
 	_ dialer.PacketDialerWithDestination  = (*ServerEndpoint)(nil)
 	_ masque.ServerHandler                = (*ServerEndpoint)(nil)
@@ -44,22 +45,27 @@ var (
 
 type ServerEndpoint struct {
 	endpointBase
-	ctx            context.Context
-	dnsRouter      adapter.DNSRouter
-	listener       *listener.Listener
-	httpServer     *http.Server
-	tlsConfig      tls.ServerConfig
-	http3          bool
-	quicOptions    option.QUICOptions
-	http3Server    io.Closer
-	server         *masque.Server
-	deviceOptions  *device.Options
-	device         device.Device
-	localAddresses []netip.Prefix
-	started        atomic.Bool
+	ctx                  context.Context
+	dnsRouter            adapter.DNSRouter
+	innerDNSQueryOptions adapter.DNSQueryOptions
+	listener             *listener.Listener
+	httpServer           *http.Server
+	tlsConfig            tls.ServerConfig
+	http3                bool
+	quicOptions          option.QUICOptions
+	http3Server          io.Closer
+	server               *masque.Server
+	deviceOptions        *device.Options
+	device               device.Device
+	localAddresses       []netip.Prefix
+	started              atomic.Bool
 }
 
 func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MASQUEServerEndpointOptions) (adapter.Endpoint, error) {
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	if options.MTU == 0 {
 		options.MTU = masque.DefaultMTU
 	}
@@ -83,18 +89,26 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 			router:  router,
 			logger:  logger,
 		},
-		ctx:            ctx,
-		dnsRouter:      service.FromContext[adapter.DNSRouter](ctx),
-		http3:          serveHTTP3,
-		quicOptions:    options.HTTP3Options,
-		localAddresses: options.Address,
+		ctx:                  ctx,
+		dnsRouter:            service.FromContext[adapter.DNSRouter](ctx),
+		innerDNSQueryOptions: innerDNSQueryOptions,
+		http3:                serveHTTP3,
+		quicOptions:          options.HTTP3Options,
+		localAddresses:       options.Address,
+	}
+	path := options.Path
+	protocol := "connect-ip"
+	if options.Warp {
+		protocol = masque.WarpProtocol
+		path = cmp.Or(path, masque.WarpPath)
 	}
 	server, err := masque.NewServer(masque.ServerOptions{
 		Context:         ctx,
 		Logger:          logger,
-		Path:            options.Path,
+		Path:            path,
 		Address:         options.Address,
 		AdvertiseRoutes: options.AdvertiseRoutes,
+		Warp:            options.Warp,
 		Resolve:         serverEndpoint.resolve,
 		Handler:         serverEndpoint,
 	})
@@ -108,7 +122,7 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		HTTP1:         serveHTTP1,
 		HTTP2:         serveHTTP2,
 		HTTP2Options:  options.HTTP2Options,
-		Tunnels:       map[string]http.TunnelHandler{"connect-ip": server},
+		Tunnels:       map[string]http.TunnelHandler{protocol: server},
 	})
 	if options.TLS != nil {
 		tlsConfig, tlsErr := tls.NewServerWithOptions(tls.ServerOptions{
@@ -141,7 +155,7 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 }
 
 func (s *ServerEndpoint) resolve(ctx context.Context, domain string) ([]netip.Addr, error) {
-	return s.dnsRouter.Lookup(ctx, domain, adapter.DNSQueryOptions{})
+	return s.dnsRouter.Lookup(ctx, domain, s.innerDNSQueryOptions)
 }
 
 func (s *ServerEndpoint) Start(stage adapter.StartStage) error {
@@ -217,6 +231,10 @@ func (s *ServerEndpoint) PreMatchFlow(network string, destination netip.Addr) ad
 	return adapter.PreMatchFlow
 }
 
+func (s *ServerEndpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return s.innerDNSQueryOptions
+}
+
 func (s *ServerEndpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return s.device.PortAddresses()
 }
@@ -271,7 +289,7 @@ func (s *ServerEndpoint) DialContext(ctx context.Context, network string, destin
 		return nil, E.New("endpoint is not ready yet")
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, s.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -289,7 +307,7 @@ func (s *ServerEndpoint) ListenPacketWithDestination(ctx context.Context, destin
 		return nil, netip.Addr{}, E.New("endpoint is not ready yet")
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := s.dnsRouter.Lookup(ctx, destination.Fqdn, s.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

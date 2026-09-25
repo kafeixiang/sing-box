@@ -22,9 +22,12 @@
   ],
   "tls": {},
   "path": "",
+  "warp": false,
   "address": [],
   "advertise_routes": [],
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1280,
 
@@ -71,13 +74,23 @@ IP 代理资源的 URI 模板路径，可以包含 `target` 和 `ipproto` 变量
 
 默认使用 `/.well-known/masque/ip/{target}/{ipproto}/`。
 
+启用 `warp` 时默认使用 `/`。
+
+### warp
+
+接受 Cloudflare WARP 魔改过的 CONNECT-IP。
+
+服务器接受 `cf-connect-ip`。它不分配地址，也不发送地址或路由胶囊。客户端的地址取自它发出的 IP 数据包的源地址，并且必须落在 `address` 内。
+
+HTTP/2 客户端使用带 `cf-connect-proto: cf-connect-ip` 的 `CONNECT`。空的请求路径按 `/` 处理。HTTP/1 和 HTTP/2 的 DATAGRAM 胶囊不含上下文标识。HTTP/3 使用上下文标识为 0 的 QUIC 数据报。
+
 ### address
 
 ==必填==
 
 隧道网络的 IP 前缀列表，每个 IP 版本最多一个。
 
-前缀中的地址由服务器自己使用，前缀内的其他地址分配给客户端。
+前缀中的地址由服务器自己使用。未启用 `warp` 时，前缀内的其他地址分配给客户端。启用 `warp` 时，客户端使用前缀内自己选择的地址。
 
 ### advertise_routes
 
@@ -96,6 +109,30 @@ IP 代理资源的 URI 模板路径，可以包含 `target` 和 `ipproto` 变量
 endpoint 会配置接口地址和 MTU，但不会安装操作系统路由或 DNS 设置。
 
 如果禁用，sing-box 将使用内部网络栈。
+
+### gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试为系统接口启用通用分段卸载。
+
+当 `system` 为 `true` 时，默认启用。设为 `false` 可禁用。
+
+当 `system` 为 `false` 时，此选项不生效。
+
+### inner_domain_resolver
+
+指定将此 endpoint 用作出站时，解析目标域名所使用的 DNS 解析器。适用于 TCP 和 UDP。
+
+当此端点被选中用于 L3 转发时，也使用此解析器解析尚未解析的目标域名。
+
+此选项使用与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 相同的格式。
+
+未设置时，使用现有 DNS 路由规则及默认 DNS。目标为 IP 地址时不进行域名解析。
+
+此解析器也用于解析 CONNECT-IP 请求路径中 `target` 指定的域名；解析结果仍受 `advertise_routes` 限制。
 
 ### name
 

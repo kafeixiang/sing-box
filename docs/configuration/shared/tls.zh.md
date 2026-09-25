@@ -14,6 +14,7 @@ icon: material/new-box
     :material-plus: [spoof](#spoof)  
     :material-plus: [spoof_method](#spoof_method)  
     :material-plus: [engine](#engine)  
+    :material-plus: [certificate_server_name](#certificate_server_name)<br>
     :material-delete-clock: [acme](#acme-字段)
 
 !!! quote "sing-box 1.13.0 中的更改"
@@ -95,6 +96,21 @@ icon: material/new-box
     "pq_signature_schemes_enabled": false,
     "dynamic_record_sizing_disabled": false
   },
+  "jls": {
+    "enabled": false,
+    "users": [
+      {
+        "username": "",
+        "password": ""
+      }
+    ],
+    "fallback": {
+      "server": "google.com",
+      "server_port": 443,
+
+      ... // 拨号字段
+    }
+  },
   "reality": {
     "enabled": false,
     "handshake": {
@@ -120,6 +136,7 @@ icon: material/new-box
   "engine": "",
   "disable_sni": false,
   "server_name": "",
+  "certificate_server_name": "",
   "insecure": false,
   "alpn": [],
   "min_version": "",
@@ -130,6 +147,7 @@ icon: material/new-box
   "certificate_path": "",
   "certificate_sha256": [],
   "certificate_public_key_sha256": [],
+  "certificate_pin_sha256": "",
   "client_certificate": [],
   "client_certificate_path": "",
   "client_key": [],
@@ -155,6 +173,11 @@ icon: material/new-box
   "utls": {
     "enabled": false,
     "fingerprint": ""
+  },
+  "jls": {
+    "enabled": false,
+    "password": "",
+    "iv": ""
   },
   "reality": {
     "enabled": false,
@@ -218,6 +241,7 @@ TLS 版本值：
 支持的字段：
 
 * `server_name`
+* `certificate_server_name`
 * `insecure`
 * `alpn`
 * `min_version`
@@ -225,6 +249,7 @@ TLS 版本值：
 * `certificate` / `certificate_path`
 * `certificate_sha256`
 * `certificate_public_key_sha256`
+* `certificate_pin_sha256`
 * `handshake_timeout`
 
 不支持的字段：
@@ -252,6 +277,7 @@ TLS 版本值：
 支持的字段：
 
 * `server_name`
+* `certificate_server_name`
 * `insecure`
 * `alpn`
 * `min_version`
@@ -259,6 +285,7 @@ TLS 版本值：
 * `certificate` / `certificate_path`
 * `certificate_sha256`
 * `certificate_public_key_sha256`
+* `certificate_pin_sha256`
 * `handshake_timeout`
 
 不支持的字段：
@@ -281,9 +308,21 @@ TLS 版本值：
 
 #### server_name
 
-用于验证返回证书上的主机名，除非设置不安全。
+用于验证返回证书上的主机名，除非设置了 `certificate_server_name` 或 `insecure`。
 
 它还包含在 ClientHello 中以支持虚拟主机，除非它是 IP 地址。
+
+#### certificate_server_name
+
+!!! question "自 sing-box 1.14.0 起"
+
+==仅客户端==
+
+覆盖用于验证返回证书主机名的服务器名称。
+
+与 `server_name` 不同，此选项不会改变 ClientHello 中包含的服务器名称（SNI）。
+
+如果为空，则使用 `server_name` 验证证书主机名。
 
 #### insecure
 
@@ -362,6 +401,28 @@ openssl x509 -in certificate.pem -outform der | openssl dgst -sha256 -binary | o
 
 # 对于远程服务器的证书
 echo | openssl s_client -servername example.com -connect example.com:443 2>/dev/null | openssl x509 -outform der | openssl dgst -sha256 -binary | openssl enc -base64
+```
+
+#### certificate_pin_sha256
+
+==仅客户端==
+
+单个证书的 SHA-256 指纹，基于整个 DER 编码的证书计算，使用十六进制格式。
+允许大小写、冒号分隔和首尾空白。
+
+固定叶证书时，只检查证书指纹，不检查域名、有效期或系统信任链。
+固定证书链中的 CA 证书时，将其作为信任锚，并检查叶证书的证书链、域名、有效期和服务器认证用途。
+CA 证书必须出现在引擎取得的证书链中；系统引擎可能提供由系统构建的证书链。
+
+与 `certificate_sha256`、`certificate_public_key_sha256`、`certificate`、`certificate_path` 及启用的 `reality` 互斥，同时配置会报错。
+允许与 `insecure: true` 共用，但不会跳过上述 pin 校验。
+支持 Go TLS、uTLS、Apple/Windows TLS 及 Apple HTTP 引擎。
+Go TLS 和 uTLS 允许同时设置 `disable_sni`，固定 CA 时仍校验目标域名。
+
+生成指纹：
+
+```bash
+sing-box generate pinsha256 certificate.crt
 ```
 
 #### certificate_public_key_sha256
@@ -604,6 +665,16 @@ uTLS 是 "crypto/tls" 的一个分支，它提供了 ClientHello 指纹识别阻
 * randomized
 
 默认使用 chrome 指纹。
+
+#### jls
+
+启用基于 uTLS 实现的 JLS 认证。JLS 要求 TLS 1.3，并通过 ClientHello 和 ServerHello 的 random 字段认证对端。
+
+服务端的每个 `users` 项均包含 `username` 和 `password`；客户端的 `username` 和 `password` 必须与其中一项一致。JLS 不能与 Reality 或 ECH 同时启用。构建时必须包含 `with_utls` 标签；客户端未显式配置 `utls.fingerprint` 时使用 Go 指纹。
+
+服务端的 `fallback` 会将未通过认证的 TLS 连接转发到配置的目标。原始 ClientHello 会被原样重放，随后双向转发连接。支持的拨号选项参阅[拨号字段](/zh/configuration/shared/dial/)。
+
+JLS 服务端目前至少需要配置一个用户，以及内联证书/密钥或 `certificate_path`/`key_path`；不支持 ACME、证书提供器和客户端证书认证。
 
 ### ECH 字段
 

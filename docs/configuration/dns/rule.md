@@ -154,7 +154,9 @@ icon: material/alert-decagram
         "user_id": [
           1000
         ],
-        "clash_mode": "direct",
+        "clash_mode": [
+          "direct"
+        ],
         "network_type": [
           "wifi"
         ],
@@ -552,6 +554,7 @@ Match specified DNS servers' preferred domains.
 | `mdns`        | Match mDNS local domains (`*.local.` and IPv4/IPv6 link-local reverse zones) |
 | `tailscale`   | Match MagicDNS hosts and DNS route suffixes                                  |
 | `openconnect` | Match split DNS and search domains pushed by the VPN server                  |
+| `easyconnect` | Match resource-list domains published by the VPN server                      |
 | `resolved`    | Match split DNS and search domains from systemd-resolved links               |
 
 #### dns_server_address
@@ -568,6 +571,7 @@ Match specified DNS servers' server addresses.
 | `tailscale`   | Match DNS resolvers of the tailnet            |
 | `openvpn`     | Match DNS servers pushed by the VPN server    |
 | `openconnect` | Match DNS servers pushed by the VPN server    |
+| `easyconnect` | Match DNS servers pushed by the VPN server    |
 
 #### dns_search_domain
 
@@ -583,6 +587,7 @@ Match specified DNS servers' search domains.
 | `tailscale`   | Match search domains of the tailnet              |
 | `openvpn`     | Match search domains pushed by the VPN server    |
 | `openconnect` | Match search domains pushed by the VPN server    |
+| `easyconnect` | Match search domains pushed by the VPN server    |
 
 #### wifi_ssid
 

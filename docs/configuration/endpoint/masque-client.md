@@ -17,11 +17,15 @@
   "password": "",
   "path": "",
   "headers": {},
+  "warp": false,
+  "address": [],
   "version": 0,
   "disable_version_fallback": false,
   "tls": {},
   "advertise_routes": [],
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1280,
   "on_demand": false,
@@ -68,6 +72,22 @@ URI template path of the IP proxying resource, may contain the `target` and `ipp
 
 Extra headers of HTTP request.
 
+### warp
+
+Use Cloudflare WARP's modified CONNECT-IP.
+
+The tunnel protocol is `cf-connect-ip`. The path defaults to `/` and the request authority defaults to `cloudflareaccess.com`, unless `path` or a `Host` header is set. Address and route capsules are not exchanged. Set `address` to the IPv4 and IPv6 addresses assigned to the device. IP packets are sent as soon as the HTTP tunnel is established.
+
+HTTP/3 also sends the draft setting `SETTINGS_H3_DATAGRAM` (`0x276`) and uses 20-byte QUIC connection IDs. Packets are carried in QUIC datagrams with context identifier 0. HTTP/2 sends `CONNECT` with `cf-connect-proto: cf-connect-ip` and `pq-enabled: false`, and carries packets in DATAGRAM capsules without a context identifier. HTTP/1 uses the same capsules. Cloudflare's endpoints speak HTTP/3 and HTTP/2.
+
+WARP authenticates the device with a TLS client certificate. Set `tls.server_name` to `consumer-masque.cloudflareclient.com`. The endpoint certificate is not issued for that name: enable `tls.insecure` and pin the endpoint key with `tls.certificate_public_key_sha256`.
+
+### address
+
+Local addresses of the tunnel interface.
+
+Required when `warp` is enabled.
+
 ### version
 
 HTTP version.
@@ -106,6 +126,30 @@ The endpoint configures interface addresses and MTU but does not install
 operating-system routes or DNS settings.
 
 If disabled, sing-box uses the internal network stack.
+
+### gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Attempt to enable generic segmentation offload for the system interface.
+
+Enabled by default when `system` is `true`. Set to `false` to disable.
+
+This option has no effect when `system` is `false`.
+
+### inner_domain_resolver
+
+Set the DNS resolver used for destination domain names when this endpoint is selected as an outbound. Applies to TCP and UDP.
+
+It is also used to resolve unresolved domain destinations when this endpoint is selected for L3 forwarding.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When unset, existing DNS routing rules and the default DNS apply. IP destinations do not require domain resolution.
+
+This option does not affect MASQUE server address resolution, which continues to use `domain_resolver` from the dial fields.
 
 ### name
 

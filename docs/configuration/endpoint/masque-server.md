@@ -22,9 +22,12 @@
   ],
   "tls": {},
   "path": "",
+  "warp": false,
   "address": [],
   "advertise_routes": [],
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1280,
 
@@ -71,13 +74,23 @@ URI template path of the IP proxying resource, may contain the `target` and `ipp
 
 `/.well-known/masque/ip/{target}/{ipproto}/` is used by default.
 
+With `warp` enabled, `/` is used by default.
+
+### warp
+
+Accept Cloudflare WARP's modified CONNECT-IP.
+
+The server accepts `cf-connect-ip`. It does not assign addresses and does not send address or route capsules. A client's address is the source address of the IP packets it sends, and must fall inside `address`.
+
+HTTP/2 clients use `CONNECT` with `cf-connect-proto: cf-connect-ip`. An empty request path is treated as `/`. DATAGRAM capsules on HTTP/1 and HTTP/2 do not contain a context identifier. HTTP/3 uses QUIC datagrams with context identifier 0.
+
 ### address
 
 ==Required==
 
 List of IP prefixes of the tunnel network, at most one for each IP version.
 
-The address of the prefix is used by the server itself, other addresses in the prefix are assigned to clients.
+The address of the prefix is used by the server itself. Without `warp`, other addresses in the prefix are assigned to clients. With `warp`, clients choose their own addresses inside the prefix.
 
 ### advertise_routes
 
@@ -97,6 +110,30 @@ The endpoint configures interface addresses and MTU but does not install
 operating-system routes or DNS settings.
 
 If disabled, sing-box uses the internal network stack.
+
+### gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Attempt to enable generic segmentation offload for the system interface.
+
+Enabled by default when `system` is `true`. Set to `false` to disable.
+
+This option has no effect when `system` is `false`.
+
+### inner_domain_resolver
+
+Set the DNS resolver used for destination domain names when this endpoint is selected as an outbound. Applies to TCP and UDP.
+
+It is also used to resolve unresolved domain destinations when this endpoint is selected for L3 forwarding.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When unset, existing DNS routing rules and the default DNS apply. IP destinations do not require domain resolution.
+
+This resolver also resolves domain names in the CONNECT-IP request path's `target`. The resolved addresses remain subject to `advertise_routes`.
 
 ### name
 

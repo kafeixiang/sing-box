@@ -14,6 +14,7 @@ icon: material/new-box
     :material-plus: [spoof](#spoof)  
     :material-plus: [spoof_method](#spoof_method)  
     :material-plus: [engine](#engine)  
+    :material-plus: [certificate_server_name](#certificate_server_name)<br>
     :material-delete-clock: [acme](#acme-fields)
 
 !!! quote "Changes in sing-box 1.13.0"
@@ -95,6 +96,21 @@ icon: material/new-box
     "pq_signature_schemes_enabled": false,
     "dynamic_record_sizing_disabled": false
   },
+  "jls": {
+    "enabled": false,
+    "users": [
+      {
+        "username": "",
+        "password": ""
+      }
+    ],
+    "fallback": {
+      "server": "google.com",
+      "server_port": 443,
+
+      ... // Dial Fields
+    }
+  },
   "reality": {
     "enabled": false,
     "handshake": {
@@ -120,6 +136,7 @@ icon: material/new-box
   "engine": "",
   "disable_sni": false,
   "server_name": "",
+  "certificate_server_name": "",
   "insecure": false,
   "alpn": [],
   "min_version": "",
@@ -130,6 +147,7 @@ icon: material/new-box
   "certificate_path": "",
   "certificate_sha256": [],
   "certificate_public_key_sha256": [],
+  "certificate_pin_sha256": "",
   "client_certificate": [],
   "client_certificate_path": "",
   "client_key": [],
@@ -155,6 +173,11 @@ icon: material/new-box
   "utls": {
     "enabled": false,
     "fingerprint": ""
+  },
+  "jls": {
+    "enabled": false,
+    "password": "",
+    "iv": ""
   },
   "reality": {
     "enabled": false,
@@ -218,6 +241,7 @@ Values:
 Supported fields:
 
 * `server_name`
+* `certificate_server_name`
 * `insecure`
 * `alpn`
 * `min_version`
@@ -225,6 +249,7 @@ Supported fields:
 * `certificate` / `certificate_path`
 * `certificate_sha256`
 * `certificate_public_key_sha256`
+* `certificate_pin_sha256`
 * `handshake_timeout`
 
 Unsupported fields:
@@ -252,6 +277,7 @@ The default version range is TLS 1.2 to TLS 1.3, matching the `go` engine.
 Supported fields:
 
 * `server_name`
+* `certificate_server_name`
 * `insecure`
 * `alpn`
 * `min_version`
@@ -259,6 +285,7 @@ Supported fields:
 * `certificate` / `certificate_path`
 * `certificate_sha256`
 * `certificate_public_key_sha256`
+* `certificate_pin_sha256`
 * `handshake_timeout`
 
 Unsupported fields:
@@ -281,9 +308,21 @@ Do not send server name in ClientHello.
 
 #### server_name
 
-Used to verify the hostname on the returned certificates unless insecure is given.
+Used to verify the hostname on the returned certificates unless `certificate_server_name` or `insecure` is given.
 
 It is also included in the client's handshake to support virtual hosting unless it is an IP address.
+
+#### certificate_server_name
+
+!!! question "Since sing-box 1.14.0"
+
+==Client only==
+
+Overrides the server name used to verify the hostname on the returned certificates.
+
+Unlike `server_name`, this option does not affect the server name included in the ClientHello (SNI).
+
+If empty, `server_name` is used for certificate hostname verification.
 
 #### insecure
 
@@ -366,6 +405,28 @@ openssl x509 -in certificate.pem -outform der | openssl dgst -sha256 -binary | o
 
 # For a certificate from a remote server
 echo | openssl s_client -servername example.com -connect example.com:443 2>/dev/null | openssl x509 -outform der | openssl dgst -sha256 -binary | openssl enc -base64
+```
+
+#### certificate_pin_sha256
+
+==Client only==
+
+A single SHA-256 fingerprint of the whole DER-encoded certificate, in hexadecimal format.
+Uppercase, lowercase, colon separators and surrounding whitespace are accepted.
+
+A matching leaf certificate is accepted without checking its hostname, validity period or system trust chain.
+A matching CA certificate in the chain is used as a trust anchor; the leaf's chain, hostname, validity period and server-auth usage are then verified.
+The pinned CA must appear in the chain obtained by the engine; system engines may provide a chain built by the operating system.
+
+Mutually exclusive with `certificate_sha256`, `certificate_public_key_sha256`, `certificate`, `certificate_path` and enabled `reality`; configuring them together is an error.
+May be combined with `insecure: true`, which does not bypass pin verification.
+Supported by Go TLS, uTLS, Apple/Windows TLS and the Apple HTTP engine.
+Go TLS and uTLS also allow `disable_sni`; CA pins still verify the target hostname.
+
+Generate the fingerprint with:
+
+```bash
+sing-box generate pinsha256 certificate.crt
 ```
 
 #### certificate_public_key_sha256
@@ -606,6 +667,16 @@ Available fingerprint values:
 * randomized
 
 Chrome fingerprint will be used if empty.
+
+#### jls
+
+Enables JLS authentication implemented on top of uTLS. JLS requires TLS 1.3 and authenticates the peer through the ClientHello and ServerHello random fields.
+
+Each server `users` entry has a `username` and `password`; the client `username` and `password` must match one entry. JLS cannot be enabled together with Reality or ECH. The `with_utls` build tag is required; the uTLS Go fingerprint is used on the client when no explicit `utls.fingerprint` is configured.
+
+On the server, `fallback` forwards unauthenticated TLS connections to the configured destination. The original ClientHello is replayed unchanged, and the connection is then relayed in both directions. See [Dial Fields](/configuration/shared/dial/) for supported dialer options.
+
+JLS server currently requires at least one user and an inline certificate/key or `certificate_path`/`key_path`; ACME, certificate providers, and client certificate authentication are unavailable.
 
 ### ECH Fields
 

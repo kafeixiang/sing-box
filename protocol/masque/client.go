@@ -1,6 +1,7 @@
 package masque
 
 import (
+	"cmp"
 	"context"
 	"math"
 	"net"
@@ -38,7 +39,7 @@ const defaultKeepAlivePeriod = 10 * time.Second
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*ClientEndpoint)(nil)
-	_ adapter.FlowOutbound                = (*ClientEndpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*ClientEndpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*ClientEndpoint)(nil)
 	_ adapter.OnDemandEndpoint            = (*ClientEndpoint)(nil)
 	_ dialer.PacketDialerWithDestination  = (*ClientEndpoint)(nil)
@@ -47,16 +48,17 @@ var (
 
 type ClientEndpoint struct {
 	endpointBase
-	ctx           context.Context
-	dnsRouter     adapter.DNSRouter
-	client        *masque.Client
-	deviceOptions *device.Options
-	device        device.Device
-	mtu           uint32
-	onDemand      bool
-	stateAccess   sync.Mutex
-	deviceStarted bool
-	state         atomic.Pointer[clientState]
+	ctx                  context.Context
+	dnsRouter            adapter.DNSRouter
+	innerDNSQueryOptions adapter.DNSQueryOptions
+	client               *masque.Client
+	deviceOptions        *device.Options
+	device               device.Device
+	mtu                  uint32
+	onDemand             bool
+	stateAccess          sync.Mutex
+	deviceStarted        bool
+	state                atomic.Pointer[clientState]
 }
 
 type clientState struct {
@@ -66,6 +68,10 @@ type clientState struct {
 }
 
 func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MASQUEClientEndpointOptions) (adapter.Endpoint, error) {
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	if options.MTU == 0 {
 		options.MTU = masque.DefaultMTU
 	}
@@ -97,7 +103,16 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 	headers := options.Headers.Build()
 	authority := headers.Get("Host")
 	headers.Del("Host")
-	if authority == "" {
+	if options.Warp {
+		options.Path = cmp.Or(options.Path, masque.WarpPath)
+		authority = cmp.Or(authority, masque.WarpAuthority)
+		if _, loaded := headers["User-Agent"]; !loaded {
+			headers["User-Agent"] = []string{""}
+		}
+		if len(options.Address) == 0 {
+			return nil, E.New("missing address")
+		}
+	} else if authority == "" {
 		server := options.ServerOptions.Build()
 		authority = server.String()
 		if server.Port == 443 {
@@ -114,6 +129,7 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		Headers:                headers,
 		Version:                version,
 		DisableVersionFallback: options.DisableVersionFallback,
+		Warp:                   options.Warp,
 		HTTP2Options:           http2Options,
 		HTTP3Options:           options.HTTP3Options,
 	})
@@ -126,10 +142,11 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 			router:  router,
 			logger:  logger,
 		},
-		ctx:       ctx,
-		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
-		mtu:       options.MTU,
-		onDemand:  options.OnDemand,
+		ctx:                  ctx,
+		dnsRouter:            service.FromContext[adapter.DNSRouter](ctx),
+		innerDNSQueryOptions: innerDNSQueryOptions,
+		mtu:                  options.MTU,
+		onDemand:             options.OnDemand,
 	}
 	clientEndpoint.state.Store(&clientState{})
 	clientEndpoint.deviceOptions = newDeviceOptions(ctx, logger, clientEndpoint, options.MASQUEEndpointOptions, time.Duration(options.UDPTimeout), nil)
@@ -139,6 +156,8 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		HTTPClient:      httpClient,
 		Path:            options.Path,
 		AdvertiseRoutes: options.AdvertiseRoutes,
+		Addresses:       options.Address,
+		Warp:            options.Warp,
 		Handler:         clientEndpoint,
 	})
 	if err != nil {
@@ -238,6 +257,10 @@ func (c *ClientEndpoint) PreMatchFlow(network string, destination netip.Addr) ad
 	return adapter.PreMatchFlow
 }
 
+func (c *ClientEndpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return c.innerDNSQueryOptions
+}
+
 func (c *ClientEndpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return c.device.PortAddresses()
 }
@@ -304,7 +327,7 @@ func (c *ClientEndpoint) DialContext(ctx context.Context, network string, destin
 		return nil, err
 	}
 	if destination.IsDomain() {
-		destinationAddresses, lookupErr := c.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, lookupErr := c.dnsRouter.Lookup(ctx, destination.Fqdn, c.innerDNSQueryOptions)
 		if lookupErr != nil {
 			return nil, lookupErr
 		}
@@ -323,7 +346,7 @@ func (c *ClientEndpoint) ListenPacketWithDestination(ctx context.Context, destin
 		return nil, netip.Addr{}, err
 	}
 	if destination.IsDomain() {
-		destinationAddresses, lookupErr := c.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, lookupErr := c.dnsRouter.Lookup(ctx, destination.Fqdn, c.innerDNSQueryOptions)
 		if lookupErr != nil {
 			return nil, netip.Addr{}, lookupErr
 		}

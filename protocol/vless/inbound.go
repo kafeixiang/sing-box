@@ -9,6 +9,7 @@ import (
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
 	"github.com/sagernet/sing-box/common/mux"
+	"github.com/sagernet/sing-box/common/speedtest"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
@@ -50,7 +51,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	inbound := &Inbound{
 		Adapter: inbound.NewAdapter(C.TypeVLESS, tag),
 		ctx:     ctx,
-		router:  uot.NewRouter(router, logger),
+		router:  uot.NewRouter(speedtest.NewRouter(router, logger, speedtest.ParseHandleOption(options.SpeedTest)), logger),
 		logger:  logger,
 		users:   options.Users,
 	}
@@ -59,7 +60,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if err != nil {
 		return nil, err
 	}
-	service := vless.NewService[int](logger, adapter.NewUpstreamContextHandler(inbound.newConnectionEx, inbound.newPacketConnectionEx))
+	service, err := vless.NewService[int](ctx, options.Decryption, logger, adapter.NewUpstreamContextHandler(inbound.newConnectionEx, inbound.newPacketConnectionEx))
+	if err != nil {
+		return nil, err
+	}
 	service.UpdateUsers(common.MapIndexed(inbound.users, func(index int, _ option.VLESSUser) int {
 		return index
 	}), common.Map(inbound.users, func(it option.VLESSUser) string {
@@ -108,6 +112,12 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 	}
 	if h.tlsConfig != nil {
 		err := h.tlsConfig.Start()
+		if err != nil {
+			return err
+		}
+	}
+	if h.service != nil {
+		err := h.service.Start()
 		if err != nil {
 			return err
 		}

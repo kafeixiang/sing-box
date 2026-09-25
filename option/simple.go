@@ -15,6 +15,8 @@ type SocksInboundOptions struct {
 	ListenOptions
 	Users          []auth.User           `json:"users,omitempty"`
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type HTTPMixedInboundOptions struct {
@@ -23,6 +25,8 @@ type HTTPMixedInboundOptions struct {
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
 	SetSystemProxy bool                  `json:"set_system_proxy,omitempty"`
 	InboundTLSOptionsContainer
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type _HTTPInboundOptions struct {
@@ -34,6 +38,8 @@ type _HTTPInboundOptions struct {
 	InboundTLSOptionsContainer
 	HTTP2Options HTTP2Options `json:"-"`
 	HTTP3Options QUICOptions  `json:"-"`
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type HTTPInboundOptions _HTTPInboundOptions
@@ -73,11 +79,19 @@ func (o HTTPInboundOptions) DescribeSchema(builder schema.Builder) (*schema.Node
 type SOCKSOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version    string             `json:"version,omitempty" enum:"4,4a,5"`
-	Username   string             `json:"username,omitempty"`
-	Password   string             `json:"password,omitempty"`
-	Network    NetworkList        `json:"network,omitempty"`
-	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
+	Version             string                `json:"version,omitempty" enum:"4,4a,5"`
+	Username            string                `json:"username,omitempty"`
+	Password            string                `json:"password,omitempty"`
+	Network             NetworkList           `json:"network,omitempty"`
+	UDPOverTCP          *UDPOverTCPOptions    `json:"udp_over_tcp,omitempty"`
+	InnerDomainResolver *DomainResolveOptions `json:"inner_domain_resolver,omitempty"`
+}
+
+func (o *SOCKSOutboundOptions) TakeInnerDomainResolverOptions() *DomainResolveOptions {
+	if o.Version != "4" {
+		return nil
+	}
+	return o.InnerDomainResolver
 }
 
 type _HTTPOutboundOptions struct {

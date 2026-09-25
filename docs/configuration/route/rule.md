@@ -144,7 +144,9 @@ icon: material/new-box
         "user_id": [
           1000
         ],
-        "clash_mode": "direct",
+        "clash_mode": [
+          "direct"
+        ],
         "network_type": [
           "wifi"
         ],
@@ -480,11 +482,12 @@ See [Wi-Fi State](/configuration/shared/wifi-state/) for details.
 
 Match specified outbounds' preferred routes.
 
-| Type        | Match                                              |
-|-------------|----------------------------------------------------|
-| `tailscale` | Match MagicDNS domains and peers' allowed IPs      |
-| `wireguard` | Match peers's allowed IPs                          |
-| `bridge`    | Match all addresses except local addresses of the machine, only in [pre-match](/configuration/shared/pre-match/) |
+| Type          | Match                                              |
+|---------------|----------------------------------------------------|
+| `tailscale`   | Match MagicDNS domains and peers' allowed IPs      |
+| `wireguard`   | Match peers's allowed IPs                          |
+| `easyconnect` | Match resource-list prefixes and domains published by the VPN server |
+| `bridge`      | Match all addresses except local addresses of the machine, only in [pre-match](/configuration/shared/pre-match/) |
 
 #### dns_server_address
 
@@ -500,6 +503,7 @@ Match specified DNS servers' server addresses.
 | `tailscale`   | Match DNS resolvers of the tailnet            |
 | `openvpn`     | Match DNS servers pushed by the VPN server    |
 | `openconnect` | Match DNS servers pushed by the VPN server    |
+| `easyconnect` | Match DNS servers pushed by the VPN server    |
 
 #### dns_search_domain
 
@@ -515,6 +519,7 @@ Match specified DNS servers' search domains.
 | `tailscale`   | Match search domains of the tailnet              |
 | `openvpn`     | Match search domains pushed by the VPN server    |
 | `openconnect` | Match search domains pushed by the VPN server    |
+| `easyconnect` | Match search domains pushed by the VPN server    |
 
 #### source_mac_address
 

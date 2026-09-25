@@ -37,7 +37,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*Endpoint)(nil)
-	_ adapter.FlowOutbound                = (*Endpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*Endpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*Endpoint)(nil)
 	_ adapter.OnDemandEndpoint            = (*Endpoint)(nil)
 	_ dialer.PacketDialerWithDestination  = (*Endpoint)(nil)
@@ -67,6 +67,8 @@ type Endpoint struct {
 	authFormLoopDone        chan struct{}
 	activeTransportLoopDone chan struct{}
 	hotpCounter             atomic.Uint64
+
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 type clientState struct {
@@ -80,6 +82,10 @@ type clientState struct {
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.OpenConnectEndpointOptions) (adapter.Endpoint, error) {
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	tcpKeepAliveEnabled := options.TCPKeepAliveEnabled || options.TCPKeepAlive != 0 || options.TCPKeepAliveInterval != 0
 	if tcpKeepAliveEnabled && options.DisableTCPKeepAlive {
 		return nil, E.New("tcp_keep_alive_enabled conflicts with disable_tcp_keep_alive")
@@ -121,6 +127,7 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		statusUpdated: make(chan struct{}),
 		onDemand:      options.OnDemand,
 	}
+	openConnectEndpoint.innerDNSQueryOptions = innerDNSQueryOptions
 	openConnectEndpoint.state.Store(new(clientState))
 	success := false
 	defer func() {
@@ -162,11 +169,16 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	if options.UDPTimeout != 0 {
 		udpTimeout = time.Duration(options.UDPTimeout)
 	}
+	gso := options.System
+	if options.GSO != nil {
+		gso = *options.GSO
+	}
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
 	openConnectEndpoint.deviceOptions = &device.Options{
 		Context:         ctx,
 		Logger:          logger,
 		System:          options.System,
+		GSO:             gso,
 		Handler:         openConnectEndpoint,
 		UDPTimeout:      udpTimeout,
 		ICMPTimeout:     C.ICMPTimeout,
@@ -549,6 +561,10 @@ func (e *Endpoint) PreMatchFlow(network string, destination netip.Addr) adapter.
 	return adapter.PreMatchFlow
 }
 
+func (e *Endpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return e.innerDNSQueryOptions
+}
+
 func (e *Endpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return e.device.PortAddresses()
 }
@@ -627,7 +643,7 @@ func (e *Endpoint) DialContext(ctx context.Context, network string, destination 
 		return nil, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, e.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -646,7 +662,7 @@ func (e *Endpoint) ListenPacketWithDestination(ctx context.Context, destination 
 		return nil, netip.Addr{}, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, e.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

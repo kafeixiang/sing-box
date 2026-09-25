@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -130,6 +131,14 @@ func mergeOptionsList(optionsList []*OptionsEntry) (option.Options, error) {
 	return mergedOptions, nil
 }
 
+// configCheckerFunc exposes check to the Clash API, which reloads through the
+// same path as SIGHUP.
+type configCheckerFunc func() error
+
+func (f configCheckerFunc) CheckConfig() error {
+	return f()
+}
+
 func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 	if disableColor {
 		if options.Log == nil {
@@ -138,6 +147,7 @@ func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 		options.Log.DisableColor = true
 	}
 	ctx, cancel := context.WithCancel(service.ExtendContext(globalCtx))
+	service.MustRegister[adapter.ConfigChecker](ctx, configCheckerFunc(check))
 	instance, err := box.New(box.Options{
 		Context:                    ctx,
 		Options:                    options,
@@ -194,20 +204,31 @@ func run() error {
 		}
 		runtimeDebug.FreeOSMemory()
 		for {
-			osSignal := <-osSignals
-			if osSignal == syscall.SIGHUP {
+			reloadTag := false
+			select {
+			case osSignal := <-osSignals:
+				if osSignal == syscall.SIGHUP {
+					err = check()
+					if err != nil {
+						log.Error(E.Cause(err, "reload service"))
+						continue
+					}
+					reloadTag = true
+				}
+			case <-instance.ReloadChan():
 				err = check()
 				if err != nil {
 					log.Error(E.Cause(err, "reload service"))
 					continue
 				}
+				reloadTag = true
 			}
 			cancel()
 			closeCtx, closed := context.WithCancel(context.Background())
 			go closeMonitor(closeCtx)
 			err = instance.Close()
 			closed()
-			if osSignal != syscall.SIGHUP {
+			if !reloadTag {
 				if err != nil {
 					log.Error(E.Cause(err, "sing-box did not closed properly"))
 				}
