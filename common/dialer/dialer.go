@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/udpgso"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/option"
@@ -61,6 +62,9 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	if detour, loaded := dialer.(*DetourDialer); loaded {
+		detour.disableGSO = udpgso.Disabled(dialOptions.UDPGSO)
 	}
 	if options.RemoteIsDomain && (!hasDetour || options.ResolverOnDetour || dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Server != "") {
 		var (
@@ -130,6 +134,15 @@ func NewDNSQueryOptions(ctx context.Context, domainResolver *option.DomainResolv
 	}
 	deprecated.Report(ctx, deprecated.OptionMissingDomainResolver)
 	return adapter.DNSQueryOptions{}, nil
+}
+
+// NewInnerDNSQueryOptions keeps destination lookups on DNS routing rules unless
+// an inner resolver is explicitly selected, independently of the dialer defaults.
+func NewInnerDNSQueryOptions(ctx context.Context, domainResolver *option.DomainResolveOptions) (adapter.DNSQueryOptions, error) {
+	if domainResolver == nil || domainResolver.Server == "" {
+		return adapter.DNSQueryOptions{}, nil
+	}
+	return NewDNSQueryOptions(ctx, domainResolver, false)
 }
 
 func domainResolveQueryOptions(domainResolver *option.DomainResolveOptions) adapter.DNSQueryOptions {

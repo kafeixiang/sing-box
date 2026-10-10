@@ -1,3 +1,12 @@
+!!! quote "Changes in sing-box 1.15.0"
+
+    :material-plus: [external_ui_update_interval](#external_ui_update_interval)
+
+!!! quote "Changes in sing-box 1.14.0"
+
+    :material-plus: [external_ui_http_client](#external_ui_http_client)
+    :material-delete-clock: [external_ui_download_detour](#external_ui_download_detour)
+
 !!! quote "Changes in sing-box 1.10.0"
 
     :material-plus: [access_control_allow_origin](#access_control_allow_origin)  
@@ -20,14 +29,16 @@
       "external_controller": "127.0.0.1:9090",
       "external_ui": "",
       "external_ui_download_url": "",
-      "external_ui_download_detour": "",
+      "external_ui_http_client": "", // or {}
+      "external_ui_update_interval": "",
       "secret": "",
       "default_mode": "",
       "access_control_allow_origin": [],
       "access_control_allow_private_network": false,
       
       // Deprecated
-      
+
+      "external_ui_download_detour": "",
       "store_mode": false,
       "store_selected": false,
       "store_fakeip": false,
@@ -59,13 +70,19 @@
     {
       "external_controller": "0.0.0.0:9090",
       "external_ui": "dashboard"
-      // "external_ui_download_detour": "direct"
+      // "external_ui_http_client": "my-http-client"
     }
     ```
 
 !!! note ""
 
     You can ignore the JSON Array [] tag when the content is only one item
+
+!!! info "Observability API"
+
+    When [experimental observability](observability.md) is enabled, its dedicated
+    `/observability/v1` HTTP API is mounted on this controller and protected by
+    the same `secret`.
 
 ### Fields
 
@@ -85,11 +102,42 @@ ZIP download URL for the external UI, will be used if the specified `external_ui
 
 `https://github.com/MetaCubeX/Yacd-meta/archive/gh-pages.zip` will be used if empty.
 
+#### external_ui_http_client
+
+!!! question "Since sing-box 1.14.0"
+
+HTTP Client for downloading external UI.
+
+See [HTTP Client Fields](/configuration/shared/http-client/) for details.
+
+If empty, the default HTTP client is used: the client selected by
+[`route.default_http_client`](/configuration/route/#default_http_client), or the first top-level `http_clients` entry if no default tag is specified.
+
+When external UI downloading is enabled, the client configuration is validated at startup, even if UI files already exist.
+This field cannot be combined with `external_ui_download_detour`.
+
+!!! failure "Implicit default deprecated in sing-box 1.14.0"
+
+    If neither a client nor the legacy download detour is configured, downloads fall back to the implicit HTTP client using the default outbound.
+    This fallback is deprecated in sing-box 1.14.0 and will be removed in sing-box 1.16.0. Define `http_clients` or configure this field explicitly.
+
 #### external_ui_download_detour
+
+!!! failure "Deprecated in sing-box 1.14.0"
+
+    `external_ui_download_detour` is deprecated in sing-box 1.14.0 and will be removed in sing-box 1.16.0, use `external_ui_http_client` instead.
 
 The tag of the outbound to download the external UI.
 
-Default outbound will be used if empty.
+#### external_ui_update_interval
+
+!!! question "Since sing-box 1.15.0"
+
+Update interval for the external UI. Automatic updates are disabled if empty.
+
+The minimum interval is one hour.
+
+When `cache_file.enabled` is enabled, changing `external_ui_download_url` causes the external UI to be downloaded again.
 
 #### secret
 

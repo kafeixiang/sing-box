@@ -62,13 +62,18 @@ type InboundContext struct {
 	// sniffer
 
 	Protocol     string
-	Domain       string
+	SniffHost    string
 	Client       string
 	SniffContext any
 	SnifferNames []string
 	SniffError   error
+	// Destination used for QUIC sniff caching, before routing overrides.
+	SniffDestination M.Socksaddr
 
 	// cache
+
+	CacheIPs []netip.Addr
+	Domain   string
 
 	// Deprecated: implement in rule action
 	InboundDetour             string
@@ -96,6 +101,7 @@ type InboundContext struct {
 	SourceGeoIPCode                     string
 	GeoIPCode                           string
 	ProcessInfo                         *ConnectionOwner
+	ProcessInfoResolver                 func() *ConnectionOwner `json:"-"`
 	SourceMACAddress                    net.HardwareAddr
 	SourceHostname                      string
 	QueryType                           uint16
@@ -103,6 +109,7 @@ type InboundContext struct {
 	QueryDNSSEC                         bool
 	FakeIP                              bool
 	PreMatch                            bool
+	DestOverride                        bool
 
 	// rule cache
 
@@ -115,6 +122,17 @@ type InboundContext struct {
 	DestinationPortMatch         bool
 	DeferredIPCIDRMatchGroups    uint8
 	IgnoreDestinationIPCIDRMatch bool
+}
+
+// ResolveProcessInfo upgrades a UID/package lookup only when a path matcher
+// needs it, without mutating the metadata or its cached owner. The resolver is
+// shared safely by copies of the connection metadata.
+// Inbound/platform-provided owners without a resolver remain authoritative.
+func (c *InboundContext) ResolveProcessInfo() *ConnectionOwner {
+	if c.ProcessInfoResolver != nil {
+		return c.ProcessInfoResolver()
+	}
+	return c.ProcessInfo
 }
 
 func (c *InboundContext) ResetRuleCache() {

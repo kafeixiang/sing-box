@@ -9,18 +9,15 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unicode"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/contrab/freelru"
-	"github.com/sagernet/sing/contrab/maphash"
 )
 
 const (
@@ -35,20 +32,14 @@ type linuxSearcher struct {
 	logger           log.ContextLogger
 	packageManager   tun.PackageManager
 	diagConns        [4]*socketDiagConn
-	processPathCache *freelru.Cache[uint32, *uidProcessPaths]
-}
-
-type uidProcessPaths struct {
-	entries map[uint32][]string
+	processPathCache *processPathCache
 }
 
 func NewSearcher(config Config) (Searcher, error) {
-	processPathCache := common.Must1(freelru.New[uint32, *uidProcessPaths](64, maphash.NewHasher[uint32]().Hash32, true))
-	processPathCache.SetLifetime(time.Second)
 	searcher := &linuxSearcher{
 		logger:           config.Logger,
 		packageManager:   config.PackageManager,
-		processPathCache: processPathCache,
+		processPathCache: newProcessPathCache(buildProcessPaths),
 	}
 	for _, family := range []uint8{syscall.AF_INET, syscall.AF_INET6} {
 		for _, protocol := range []uint8{syscall.IPPROTO_TCP, syscall.IPPROTO_UDP} {
@@ -63,10 +54,11 @@ func NewSearcher(config Config) (Searcher, error) {
 }
 
 func (s *linuxSearcher) ResetCache() {
-	s.processPathCache.Purge()
+	s.processPathCache.reset()
 }
 
 func (s *linuxSearcher) Close() error {
+	s.processPathCache.close()
 	var errs []error
 	for _, conn := range s.diagConns {
 		if conn == nil {
@@ -78,6 +70,13 @@ func (s *linuxSearcher) Close() error {
 }
 
 func (s *linuxSearcher) FindProcessInfo(ctx context.Context, network string, source netip.AddrPort, destination netip.AddrPort) (*adapter.ConnectionOwner, error) {
+	return s.FindProcessInfoMode(ctx, network, source, destination, LookupFull)
+}
+
+func (s *linuxSearcher) FindProcessInfoMode(ctx context.Context, network string, source netip.AddrPort, destination netip.AddrPort, mode LookupMode) (*adapter.ConnectionOwner, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	inode, uid, err := s.resolveSocketByNetlink(network, source, destination)
 	if err != nil {
 		return nil, err
@@ -85,24 +84,36 @@ func (s *linuxSearcher) FindProcessInfo(ctx context.Context, network string, sou
 	processInfo := &adapter.ConnectionOwner{
 		UserId: int32(uid),
 	}
-	processPaths, err := s.findProcessPaths(inode, uid)
+	completeProcessInfo(processInfo, s.packageManager)
+	if mode == LookupOwner && len(processInfo.PackageNames) > 0 {
+		processInfo.ProcessPaths = s.processPathCache.cached(inode, uid)
+		return processInfo, nil
+	}
+	processPaths, err := s.processPathCache.find(ctx, inode, uid, mode == LookupFull)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
 		s.logger.DebugContext(ctx, "find process path: ", err)
 	} else {
 		processInfo.ProcessPaths = processPaths
 	}
-	if s.packageManager != nil {
-		appID := uid % 100000
-		var packageNames []string
-		if sharedPackage, loaded := s.packageManager.SharedPackageByID(appID); loaded {
-			packageNames = append(packageNames, sharedPackage)
-		}
-		if packages, loaded := s.packageManager.PackagesByID(appID); loaded {
-			packageNames = append(packageNames, packages...)
-		}
-		processInfo.PackageNames = common.Uniq(packageNames)
-	}
 	return processInfo, nil
+}
+
+// FindProcessInfoByPID resolves process metadata without scanning socket file
+// descriptors across procfs. The caller already established socket ownership.
+func FindProcessInfoByPID(processID uint32, userID uint32, packageManager tun.PackageManager) (*adapter.ConnectionOwner, error) {
+	processInfo := &adapter.ConnectionOwner{
+		ProcessID: processID,
+		UserId:    int32(userID),
+	}
+	processPath, err := os.Readlink(filepath.Join(pathProc, strconv.FormatUint(uint64(processID), 10), "exe"))
+	if err == nil {
+		processInfo.ProcessPaths = []string{processPath}
+	}
+	completeProcessInfo(processInfo, packageManager)
+	return processInfo, err
 }
 
 func (s *linuxSearcher) resolveSocketByNetlink(network string, source netip.AddrPort, destination netip.AddrPort) (inode, uid uint32, err error) {
@@ -128,30 +139,7 @@ func (s *linuxSearcher) resolveSocketByNetlink(network string, source netip.Addr
 	return dumpSocketDiag(family, protocol, source, destination)
 }
 
-// The socket keeps the uid it was created with, while /proc reflects the
-// current uid of the process, so a socket created before a privilege drop
-// only appears under a scan of all users.
-func (s *linuxSearcher) findProcessPaths(targetInode, uid uint32) ([]string, error) {
-	for _, scanUID := range []uint32{uid, processPathsAllUsers} {
-		if cached, ok := s.processPathCache.Get(scanUID); ok {
-			if processPaths, found := cached.entries[targetInode]; found {
-				return processPaths, nil
-			}
-		}
-		processPaths, err := buildProcessPaths(scanUID)
-		if err != nil {
-			return nil, err
-		}
-		s.processPathCache.Add(scanUID, &uidProcessPaths{entries: processPaths})
-		inodePaths, found := processPaths[targetInode]
-		if found {
-			return inodePaths, nil
-		}
-	}
-	return nil, E.New("process of uid(", uid, "), inode(", targetInode, ") not found")
-}
-
-func buildProcessPaths(uid uint32) (map[uint32][]string, error) {
+func buildProcessPaths(ctx context.Context, uid uint32) (map[uint32][]string, error) {
 	files, err := os.ReadDir(pathProc)
 	if err != nil {
 		return nil, err
@@ -159,6 +147,9 @@ func buildProcessPaths(uid uint32) (map[uint32][]string, error) {
 	buffer := make([]byte, syscall.PathMax)
 	processPaths := make(map[uint32][]string)
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !file.IsDir() || !isPid(file.Name()) {
 			continue
 		}
@@ -186,6 +177,9 @@ func buildProcessPaths(uid uint32) (map[uint32][]string, error) {
 			continue
 		}
 		for _, fd := range fds {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			n, err := syscall.Readlink(filepath.Join(fdPath, fd.Name()), buffer)
 			if err != nil {
 				continue

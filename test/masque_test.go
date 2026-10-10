@@ -14,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/quic-go"
+	"github.com/sagernet/quic-go/http3"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
+	"github.com/sagernet/sing/common/json/badjson"
 	"github.com/sagernet/sing/common/json/badoption"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -39,6 +42,11 @@ type masqueEnvironment struct {
 
 func startMASQUE(t *testing.T, serverVersions []int, clientVersion int, disableVersionFallback bool, mtu uint32, serverRoutes []netip.Prefix, clientRoutes []netip.Prefix) masqueEnvironment {
 	t.Helper()
+	return startMASQUEConfigured(t, serverVersions, clientVersion, disableVersionFallback, mtu, serverRoutes, clientRoutes, nil)
+}
+
+func startMASQUEConfigured(t *testing.T, serverVersions []int, clientVersion int, disableVersionFallback bool, mtu uint32, serverRoutes []netip.Prefix, clientRoutes []netip.Prefix, configure func(server, client *option.Options)) masqueEnvironment {
+	t.Helper()
 	environment := masqueEnvironment{
 		serverProxyPort: reserveOpenVPNTCPPort(t),
 		clientProxyPort: reserveOpenVPNTCPPort(t),
@@ -47,7 +55,7 @@ func startMASQUE(t *testing.T, serverVersions []int, clientVersion int, disableV
 	environment.serverPort = masquePort
 	_, certPem, keyPem := createSelfSignedCertificate(t, "example.org")
 	users := []auth.User{{Username: "sekai", Password: "password"}}
-	startInstance(t, masqueInstanceOptions(C.TypeMASQUEServer, &option.MASQUEServerEndpointOptions{
+	serverOptions := masqueInstanceOptions(C.TypeMASQUEServer, &option.MASQUEServerEndpointOptions{
 		ListenOptions: option.ListenOptions{
 			Listen:     common.Ptr(badoption.Addr(netip.MustParseAddr("127.0.0.1"))),
 			ListenPort: masquePort,
@@ -65,8 +73,8 @@ func startMASQUE(t *testing.T, serverVersions []int, clientVersion int, disableV
 		},
 		Address:         []netip.Prefix{netip.MustParsePrefix(masqueServerAddress + "/24")},
 		AdvertiseRoutes: serverRoutes,
-	}, environment.serverProxyPort, ""))
-	startInstance(t, masqueInstanceOptions(C.TypeMASQUEClient, &option.MASQUEClientEndpointOptions{
+	}, environment.serverProxyPort, "")
+	clientOptions := masqueInstanceOptions(C.TypeMASQUEClient, &option.MASQUEClientEndpointOptions{
 		ServerOptions: option.ServerOptions{
 			Server:     "127.0.0.1",
 			ServerPort: masquePort,
@@ -84,7 +92,12 @@ func startMASQUE(t *testing.T, serverVersions []int, clientVersion int, disableV
 		Version:                clientVersion,
 		DisableVersionFallback: disableVersionFallback,
 		AdvertiseRoutes:        clientRoutes,
-	}, environment.clientProxyPort, "127.0.0.1"))
+	}, environment.clientProxyPort, "127.0.0.1")
+	if configure != nil {
+		configure(&serverOptions, &clientOptions)
+	}
+	startInstance(t, serverOptions)
+	startInstance(t, clientOptions)
 	waitForOpenVPNClientReady(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
 	return environment
 }
@@ -154,6 +167,74 @@ func masqueInstanceOptions(endpointType string, endpointOptions any, proxyPort u
 	}
 }
 
+func startMASQUEWarp(t *testing.T, clientVersion int) masqueEnvironment {
+	t.Helper()
+	environment := masqueEnvironment{
+		serverProxyPort: reserveOpenVPNTCPPort(t),
+		clientProxyPort: reserveOpenVPNTCPPort(t),
+	}
+	masquePort := reserveOpenVPNEchoPort(t)
+	environment.serverPort = masquePort
+	_, certPem, keyPem := createSelfSignedCertificate(t, "example.org")
+	users := []auth.User{{Username: "sekai", Password: "password"}}
+	startInstance(t, masqueInstanceOptions(C.TypeMASQUEServer, &option.MASQUEServerEndpointOptions{
+		ListenOptions: option.ListenOptions{
+			Listen:     common.Ptr(badoption.Addr(netip.MustParseAddr("127.0.0.1"))),
+			ListenPort: masquePort,
+		},
+		MASQUEEndpointOptions: option.MASQUEEndpointOptions{MTU: 0},
+		Users:                 users,
+		Warp:                  true,
+		InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
+			TLS: &option.InboundTLSOptions{
+				Enabled:         true,
+				ServerName:      "example.org",
+				CertificatePath: certPem,
+				KeyPath:         keyPem,
+			},
+		},
+		Address: []netip.Prefix{netip.MustParsePrefix(masqueServerAddress + "/24")},
+	}, environment.serverProxyPort, ""))
+	startInstance(t, masqueInstanceOptions(C.TypeMASQUEClient, &option.MASQUEClientEndpointOptions{
+		ServerOptions: option.ServerOptions{
+			Server:     "127.0.0.1",
+			ServerPort: masquePort,
+		},
+		MASQUEEndpointOptions: option.MASQUEEndpointOptions{},
+		Username:              users[0].Username,
+		Password:              users[0].Password,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+			TLS: &option.OutboundTLSOptions{
+				Enabled:         true,
+				ServerName:      "example.org",
+				CertificatePath: certPem,
+			},
+		},
+		Version:                clientVersion,
+		DisableVersionFallback: true,
+		Warp:                   true,
+		Address:                []netip.Prefix{netip.MustParsePrefix("10.8.0.2/32")},
+	}, environment.clientProxyPort, "127.0.0.1"))
+	waitForOpenVPNClientReady(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+	return environment
+}
+
+func TestMASQUEWarp(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		version int
+	}{
+		{"HTTP3", 3},
+		{"HTTP2", 2},
+		{"HTTP1", 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			environment := startMASQUEWarp(t, testCase.version)
+			testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+		})
+	}
+}
+
 func TestMASQUESelfToSelf(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
@@ -175,6 +256,69 @@ func TestMASQUEVersionFallback(t *testing.T) {
 	testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
 }
 
+func TestMASQUEVersionFallbackUDPBlackhole(t *testing.T) {
+	for _, version := range []int{2, 1} {
+		t.Run(strconv.Itoa(version), func(t *testing.T) {
+			environment := startMASQUEConfigured(t, []int{version}, 3, false, 1280, nil, nil, func(server, client *option.Options) {
+				serverOptions := server.Endpoints[0].Options.(*option.MASQUEServerEndpointOptions)
+				// Keep UDP open without responding, so QUIC has to time out
+				// rather than receiving an immediate connection-refused error.
+				socket, err := net.ListenPacket("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(serverOptions.ListenPort))))
+				require.NoError(t, err)
+				t.Cleanup(func() { socket.Close() })
+			})
+			testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+		})
+	}
+}
+
+func TestMASQUEVersionFallbackAfterHTTP3Failure(t *testing.T) {
+	var requests atomic.Int32
+	environment := startMASQUEConfigured(t, []int{2}, 3, false, 1280, nil, nil, func(server, client *option.Options) {
+		serverOptions := server.Endpoints[0].Options.(*option.MASQUEServerEndpointOptions)
+		certificate, err := tls.LoadX509KeyPair(serverOptions.TLS.CertificatePath, serverOptions.TLS.KeyPath)
+		require.NoError(t, err)
+		socket, err := net.ListenPacket("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(serverOptions.ListenPort))))
+		require.NoError(t, err)
+		t.Cleanup(func() { socket.Close() })
+		listener, err := quic.ListenEarly(socket, &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			NextProtos:   []string{http3.NextProtoH3},
+		}, &quic.Config{EnableDatagrams: true})
+		require.NoError(t, err)
+		t.Cleanup(func() { listener.Close() })
+		type connectionKey struct{}
+		h3Server := &http3.Server{
+			EnableDatagrams: true,
+			ConnContext: func(ctx context.Context, conn *quic.Conn) context.Context {
+				return context.WithValue(ctx, connectionKey{}, conn)
+			},
+			Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requests.Add(1)
+				writer.WriteHeader(http.StatusOK)
+				writer.(http.Flusher).Flush()
+				// Wait for the client's first capsule, proving OpenTunnel already
+				// succeeded, then fail the underlying QUIC connection.
+				if _, readErr := io.ReadFull(request.Body, make([]byte, 1)); readErr == nil {
+					conn := request.Context().Value(connectionKey{}).(*quic.Conn)
+					conn.CloseWithError(0x102, "test connection failure")
+				}
+			}),
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h3Server.ServeListener(listener)
+		}()
+		t.Cleanup(func() {
+			h3Server.Close()
+			<-done
+		})
+	})
+	require.EqualValues(t, 1, requests.Load(), "a failed H3 session must fall back on reconnect")
+	testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+}
+
 func TestMASQUEAdvertiseRoutes(t *testing.T) {
 	environment := startMASQUE(t, nil, 0, false, 0, nil, []netip.Prefix{netip.MustParsePrefix("10.9.0.0/24")})
 	readinessPort := reserveOpenVPNEchoPort(t)
@@ -182,6 +326,45 @@ func TestMASQUEAdvertiseRoutes(t *testing.T) {
 	waitForOpenVPNRemoteReady(t, environment.serverProxyPort, masqueSiteAddress, readinessPort, 30*time.Second)
 	closeEcho()
 	testSuitOpenVPN(t, environment.serverProxyPort, reserveOpenVPNEchoPort(t), masqueSiteAddress)
+}
+
+func TestMASQUEInnerDomainResolver(t *testing.T) {
+	newHosts := func(tag string, entries map[string]string) option.DNSServerOptions {
+		hosts := new(badjson.TypedMap[string, option.HostsDNSPredefinedValue])
+		for domain, address := range entries {
+			hosts.Put(domain, option.HostsDNSPredefinedValue{Addresses: []netip.Addr{netip.MustParseAddr(address)}})
+		}
+		return option.DNSServerOptions{Type: C.DNSTypeHosts, Tag: tag, Options: &option.HostsDNSServerOptions{Predefined: hosts}}
+	}
+	environment := startMASQUEConfigured(t, []int{1}, 1, true, 0, nil,
+		[]netip.Prefix{netip.MustParsePrefix("10.9.0.0/24")}, func(server, client *option.Options) {
+			for _, options := range []*option.Options{server, client} {
+				options.DNS = &option.DNSOptions{RawDNSOptions: option.RawDNSOptions{
+					Servers: []option.DNSServerOptions{
+						newHosts("default", nil),
+						newHosts("outer", map[string]string{"masque.invalid": "127.0.0.1"}),
+						newHosts("inner", map[string]string{
+							"server.invalid": masqueServerAddress,
+							"client.invalid": masqueSiteAddress,
+						}),
+					},
+					Final: "default",
+				}}
+			}
+			server.Endpoints[0].Options.(*option.MASQUEServerEndpointOptions).InnerDomainResolver = &option.DomainResolveOptions{Server: "inner"}
+			clientOptions := client.Endpoints[0].Options.(*option.MASQUEClientEndpointOptions)
+			clientOptions.InnerDomainResolver = &option.DomainResolveOptions{Server: "inner"}
+			clientOptions.DomainResolver = &option.DomainResolveOptions{Server: "outer"}
+			clientOptions.Server = "masque.invalid"
+		})
+	readinessPort := reserveOpenVPNEchoPort(t)
+	closeEcho := startOpenVPNReadinessEcho(t, readinessPort)
+	waitForOpenVPNRemoteReady(t, environment.serverProxyPort, masqueSiteAddress, readinessPort, 30*time.Second)
+	closeEcho()
+	// Only the selected inner resolver knows these destinations; only the outer
+	// resolver knows the MASQUE server. Both TCP and UDP must traverse the tunnel.
+	testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), "server.invalid")
+	testSuitOpenVPN(t, environment.serverProxyPort, reserveOpenVPNEchoPort(t), "client.invalid")
 }
 
 func TestMASQUENoRoute(t *testing.T) {
@@ -284,4 +467,29 @@ func TestMASQUEStuckClient(t *testing.T) {
 	closeEcho := startOpenVPNReadinessEcho(t, echoPort)
 	defer closeEcho()
 	require.NoError(t, probeOpenVPNTCPWithTimeout(environment.clientProxyPort, masqueServerAddress, echoPort, 5*time.Second))
+}
+
+func TestMASQUEH3CongestionAlgorithms(t *testing.T) {
+	for _, pair := range [][2]option.H3CongestionControl{{"new_reno", "new_reno"}, {"cubic", "cubic"}, {"bbr", "bbr"}, {"none", "none"}, {"none", ""}, {"", "none"}, {"bbr", "cubic"}} {
+		t.Run(string(pair[0])+"/"+string(pair[1]), func(t *testing.T) {
+			environment := startMASQUEConfigured(t, nil, 3, true, 1280, nil, nil, func(server, client *option.Options) {
+				server.Endpoints[0].Options.(*option.MASQUEServerEndpointOptions).H3CongestionControl = pair[1]
+				client.Endpoints[0].Options.(*option.MASQUEClientEndpointOptions).H3CongestionControl = pair[0]
+			})
+			testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+		})
+	}
+}
+
+func TestMASQUEH3CongestionFallback(t *testing.T) {
+	for _, algorithm := range []option.H3CongestionControl{"new_reno", "cubic", "bbr", "none"} {
+		for _, version := range []int{1, 2} {
+			t.Run(string(algorithm)+"/"+strconv.Itoa(version), func(t *testing.T) {
+				environment := startMASQUEConfigured(t, []int{version}, 3, false, 1280, nil, nil, func(server, client *option.Options) {
+					client.Endpoints[0].Options.(*option.MASQUEClientEndpointOptions).H3CongestionControl = algorithm
+				})
+				testSuitOpenVPN(t, environment.clientProxyPort, reserveOpenVPNEchoPort(t), masqueServerAddress)
+			})
+		}
+	}
 }

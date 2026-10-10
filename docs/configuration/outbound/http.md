@@ -12,8 +12,10 @@
   "username": "sekai",
   "password": "admin",
   "path": "",
+  "udp_path": "",
   "headers": {},
   "version": 0,
+  // "h3_congestion_control": "bbr",
   "disable_version_fallback": false,
   "tls": {},
 
@@ -48,6 +50,14 @@ Basic authorization password.
 
 Path of HTTP request.
 
+#### udp_path
+
+Path and query of the [RFC 6570](https://www.rfc-editor.org/rfc/rfc6570) URI template of the CONNECT-UDP resource ([RFC 9298](https://www.rfc-editor.org/rfc/rfc9298)).
+
+`/.well-known/masque/udp/{target_host}/{target_port}/` is used by default.
+
+The template must satisfy [RFC 9298 Section 2](https://www.rfc-editor.org/rfc/rfc9298#section-2): it must contain the `target_host` and `target_port` variables, start with `/`, contain only ASCII characters in the range `0x21`-`0x7E`, be a level 3 template or lower, and must not use the `+`, `#`, `.`, `/` or `;` operators. Simple string expansion (`{var}`), form-style query expansion (`{?var}`) and form-style query continuation (`{&var}`) are supported, for example `/masque{?target_host,target_port}` or `/masque?h={target_host}&p={target_port}`. Other variables are left undefined.
+
 #### headers
 
 Extra headers of HTTP request.
@@ -71,6 +81,18 @@ When `3`, [HTTP2 Fields](#http2-fields) are replaced by [QUIC Fields](#quic-fiel
 !!! question "Since sing-box 1.15.0"
 
 Disable automatic fallback to lower HTTP version.
+
+#### h3_congestion_control
+
+Selects the local sender congestion controller for HTTP/3 connections. Applies only to HTTP/3.
+
+Available values: `new_reno`, `cubic`, `bbr`. HTTP proxies reject `none` at startup.
+
+Omitting the field preserves the existing defaults: NewReno on the client and BBR on the server. BBR uses the Standard profile; profile and bandwidth parameters are not exposed. The setting affects only local sending, so the two peers may select different algorithms.
+
+When configured, `version` must explicitly be `3`. Builds without QUIC support reject this setting.
+
+This field does not change version fallback. Client fallback remains controlled by `disable_version_fallback`; the setting has no effect after fallback to HTTP/1 or HTTP/2.
 
 #### tls
 

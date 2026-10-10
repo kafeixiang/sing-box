@@ -36,7 +36,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*ClientEndpoint)(nil)
-	_ adapter.FlowOutbound                = (*ClientEndpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*ClientEndpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*ClientEndpoint)(nil)
 	_ adapter.OnDemandEndpoint            = (*ClientEndpoint)(nil)
 	_ dialer.PacketDialerWithDestination  = (*ClientEndpoint)(nil)
@@ -45,23 +45,24 @@ var (
 
 type ClientEndpoint struct {
 	endpointBase
-	ctx            context.Context
-	loopContext    context.Context
-	cancelLoop     context.CancelFunc
-	dnsRouter      adapter.DNSRouter
-	outboundDialer N.Dialer
-	queryOptions   adapter.DNSQueryOptions
-	client         *ovpn.Client
-	deviceOptions  *device.Options
-	device         device.Device
-	onDemand       bool
-	stateAccess    sync.Mutex
-	state          atomic.Pointer[clientState]
-	dnsTransport   *DNSTransport
-	deviceStarted  bool
-	statusAccess   sync.Mutex
-	statusUpdated  chan struct{}
-	terminalError  string
+	ctx                  context.Context
+	loopContext          context.Context
+	cancelLoop           context.CancelFunc
+	dnsRouter            adapter.DNSRouter
+	outboundDialer       N.Dialer
+	queryOptions         adapter.DNSQueryOptions
+	client               *ovpn.Client
+	deviceOptions        *device.Options
+	device               device.Device
+	onDemand             bool
+	stateAccess          sync.Mutex
+	state                atomic.Pointer[clientState]
+	dnsTransport         *DNSTransport
+	deviceStarted        bool
+	statusAccess         sync.Mutex
+	statusUpdated        chan struct{}
+	terminalError        string
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 type clientState struct {
@@ -76,6 +77,10 @@ type clientState struct {
 }
 
 func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.OpenVPNClientEndpointOptions) (adapter.Endpoint, error) {
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	loopContext, cancelLoop := context.WithCancel(ctx)
 	clientEndpoint := &ClientEndpoint{
 		endpointBase: endpointBase{
@@ -90,6 +95,7 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		statusUpdated: make(chan struct{}),
 		onDemand:      options.OnDemand,
 	}
+	clientEndpoint.innerDNSQueryOptions = innerDNSQueryOptions
 	success := false
 	defer func() {
 		if success {
@@ -128,22 +134,29 @@ func NewClientEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		deviceMTU = ovpntransport.DefaultMTU
 	}
 	packetFrontHeadroom, packetRearHeadroom := clientOptions.DataPacketHeadroom()
+	gso := options.System
+	if options.GSO != nil {
+		gso = *options.GSO
+	}
+
 	clientEndpoint.deviceOptions = &device.Options{
-		Context:             ctx,
-		Logger:              logger,
-		System:              options.System,
-		Handler:             clientEndpoint,
-		UDPTimeout:          udpTimeout,
-		ICMPTimeout:         C.ICMPTimeout,
-		UDPMapping:          tun.NATMapping(options.UDPMapping),
-		UDPFiltering:        tun.NATFiltering(options.UDPFiltering),
-		UDPNATMax:           options.UDPNATMax,
-		InterfaceFinder:     service.FromContext[adapter.NetworkManager](ctx).InterfaceFinder(),
-		Name:                options.Name,
-		NamePrefix:          "ovpn",
-		MTU:                 deviceMTU,
-		PacketFrontHeadroom: packetFrontHeadroom,
-		PacketRearHeadroom:  packetRearHeadroom,
+		Context:              ctx,
+		Logger:               logger,
+		System:               options.System,
+		GSO:                  gso,
+		Handler:              clientEndpoint,
+		UDPTimeout:           udpTimeout,
+		ICMPTimeout:          C.ICMPTimeout,
+		UDPMapping:           tun.NATMapping(options.UDPMapping),
+		UDPFiltering:         tun.NATFiltering(options.UDPFiltering),
+		UDPNATMax:            options.UDPNATMax,
+		TCPCongestionControl: options.TCPCongestionControl,
+		InterfaceFinder:      service.FromContext[adapter.NetworkManager](ctx).InterfaceFinder(),
+		Name:                 options.Name,
+		NamePrefix:           "ovpn",
+		MTU:                  deviceMTU,
+		PacketFrontHeadroom:  packetFrontHeadroom,
+		PacketRearHeadroom:   packetRearHeadroom,
 		Configuration: device.Configuration{
 			MTU:     deviceMTU,
 			Address: clientOptions.Tunnel.LocalAddress,
@@ -731,6 +744,10 @@ func (c *ClientEndpoint) PreMatchFlow(network string, destination netip.Addr) ad
 	return adapter.PreMatchFlow
 }
 
+func (c *ClientEndpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return c.innerDNSQueryOptions
+}
+
 func (c *ClientEndpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return c.device.PortAddresses()
 }
@@ -845,7 +862,7 @@ func (c *ClientEndpoint) DialContext(ctx context.Context, network string, destin
 		return nil, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := c.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := c.dnsRouter.Lookup(ctx, destination.Fqdn, c.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -864,7 +881,7 @@ func (c *ClientEndpoint) ListenPacketWithDestination(ctx context.Context, destin
 		return nil, netip.Addr{}, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := c.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := c.dnsRouter.Lookup(ctx, destination.Fqdn, c.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

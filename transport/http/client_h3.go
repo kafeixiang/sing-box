@@ -4,6 +4,7 @@ package http
 
 import (
 	"context"
+	stdTLS "crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -15,11 +16,20 @@ import (
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/quic-go/http3"
 	"github.com/sagernet/sing-box/common/httpclient"
+	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-quic"
+	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
+)
+
+const (
+	// SETTINGS_H3_DATAGRAM from draft-ietf-masque-h3-datagram-00. Cloudflare WARP still sends it.
+	warpDatagramDraftSetting = 0x276
+	// Cloudflare WARP answers with PROTOCOL_VIOLATION unless the source connection ID is 20 bytes.
+	warpConnectionIDLength = 20
 )
 
 func init() {
@@ -27,17 +37,19 @@ func init() {
 }
 
 type http3ClientImpl struct {
-	dialer        N.Dialer
-	tlsConfig     aTLS.Config
-	server        M.Socksaddr
-	authority     string
-	headers       http.Header
-	authorization string
-	quicConfig    *quic.Config
-	transport     *http3.Transport
-	access        sync.Mutex
-	conn          *http3.ClientConn
-	rawConn       net.Conn
+	dialer            N.Dialer
+	tlsConfig         aTLS.Config
+	server            M.Socksaddr
+	authority         string
+	headers           http.Header
+	authorization     string
+	quicConfig        *quic.Config
+	congestionControl option.H3CongestionControl
+	transport         *http3.Transport
+	warp              bool
+	access            sync.Mutex
+	conn              *http3.ClientConn
+	rawConn           net.Conn
 }
 
 func newHTTP3Client(options ClientOptions, authorization string) (http3Client, error) {
@@ -48,8 +60,12 @@ func newHTTP3Client(options ClientOptions, authorization string) (http3Client, e
 	if dialer == nil {
 		dialer = N.SystemDialer
 	}
-	quicConfig := httpclient.NewQUICConfig(options.HTTP3Options)
+	quicConfig := qtls.ConfigWithGSO(httpclient.NewQUICConfig(options.HTTP3Options), dialer)
 	quicConfig.EnableDatagrams = true
+	configureH3Congestion(quicConfig, options.H3CongestionControl)
+	if handshakeTimeout := options.TLSConfig.HandshakeTimeout(); handshakeTimeout > 0 {
+		quicConfig.HandshakeIdleTimeout = handshakeTimeout
+	}
 	headers := options.Headers.Clone()
 	authority := options.Server.String()
 	if options.Authority != "" {
@@ -61,15 +77,21 @@ func newHTTP3Client(options ClientOptions, authorization string) (http3Client, e
 		}
 		headers.Del("Host")
 	}
+	transport := &http3.Transport{EnableDatagrams: true, DisableCompression: true}
+	if options.Warp {
+		transport.AdditionalSettings = map[uint64]uint64{warpDatagramDraftSetting: 1}
+	}
 	return &http3ClientImpl{
-		dialer:        dialer,
-		tlsConfig:     options.TLSConfig,
-		server:        options.Server,
-		authority:     authority,
-		headers:       headers,
-		authorization: authorization,
-		quicConfig:    quicConfig,
-		transport:     &http3.Transport{EnableDatagrams: true, DisableCompression: true},
+		dialer:            dialer,
+		tlsConfig:         options.TLSConfig,
+		server:            options.Server,
+		authority:         authority,
+		headers:           headers,
+		authorization:     authorization,
+		quicConfig:        quicConfig,
+		congestionControl: options.H3CongestionControl,
+		transport:         transport,
+		warp:              options.Warp,
 	}, nil
 }
 
@@ -88,19 +110,44 @@ func (c *http3ClientImpl) acquire(ctx context.Context) (*http3.ClientConn, error
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, E.Cause1(ErrHTTP3Unavailable, err)
+		return nil, wrapHTTP3Error(err)
 	}
-	quicConn, err := qtls.DialEarly(ctx, rawConn, c.tlsConfig, c.quicConfig)
+	quicConn, err := c.dialQUIC(ctx, rawConn)
 	if err != nil {
 		rawConn.Close()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, E.Cause1(ErrHTTP3Unavailable, err)
+		return nil, wrapHTTP3Error(err)
 	}
+	applyH3Congestion(quicConn, c.congestionControl, false)
 	c.conn = c.transport.NewClientConn(quicConn)
 	c.rawConn = rawConn
 	return c.conn, nil
+}
+
+func (c *http3ClientImpl) dialQUIC(ctx context.Context, rawConn net.Conn) (*quic.Conn, error) {
+	if !c.warp {
+		return qtls.DialEarly(ctx, rawConn, c.tlsConfig, c.quicConfig)
+	}
+	// quic.DialEarlyConn offers no way to choose the connection ID length, so a single-use
+	// Transport is built over rawConn, adapted to a PacketConn to keep its wrappers in the path.
+	tlsConfig, err := c.tlsConfig.STDConfig()
+	if err != nil {
+		return nil, err
+	}
+	remoteAddr := M.SocksaddrFromNet(rawConn.RemoteAddr())
+	transport := &quic.Transport{
+		Conn:               bufio.NewUnbindPacketConnWithAddr(rawConn, remoteAddr),
+		ConnectionIDLength: warpConnectionIDLength,
+	}
+	transport.SetSingleUse(true)
+	quicConn, err := transport.DialEarly(ctx, remoteAddr.UDPAddr(), tlsConfig, c.quicConfig)
+	if err != nil {
+		_ = transport.Close()
+		return nil, qtls.WrapError(err)
+	}
+	return quicConn, nil
 }
 
 func (c *http3ClientImpl) openStream(ctx context.Context, request *http.Request) (*http3.RequestStream, *http3.ClientConn, error) {
@@ -113,7 +160,7 @@ func (c *http3ClientImpl) openStream(ctx context.Context, request *http.Request)
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
-		return nil, nil, E.Cause1(ErrHTTP3Unavailable, err)
+		return nil, nil, wrapHTTP3Error(err)
 	}
 	stop := context.AfterFunc(ctx, func() {
 		stream.CancelRead(0)
@@ -142,7 +189,7 @@ func (c *http3ClientImpl) openStream(ctx context.Context, request *http.Request)
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
-		return nil, nil, E.Cause(err, "HTTP/3 CONNECT")
+		return nil, nil, wrapHTTP3Error(E.Cause(err, "HTTP/3 CONNECT"))
 	}
 	if response.StatusCode != http.StatusOK {
 		stream.CancelRead(0)
@@ -150,6 +197,26 @@ func (c *http3ClientImpl) openStream(ctx context.Context, request *http.Request)
 		return nil, nil, statusError(response)
 	}
 	return stream, clientConn, nil
+}
+
+func wrapHTTP3Error(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return err
+	}
+	var certificateError *stdTLS.CertificateVerificationError
+	if errors.As(err, &certificateError) {
+		return err
+	}
+	var transportError *quic.TransportError
+	if errors.As(err, &transportError) && transportError.ErrorCode >= 0x100 && transportError.ErrorCode < 0x200 {
+		// TLS failures must remain visible. An ALPN negotiation failure is
+		// different: the peer may support HTTP over TCP but not HTTP/3.
+		const noApplicationProtocol = 0x100 + 120
+		if transportError.ErrorCode != noApplicationProtocol {
+			return err
+		}
+	}
+	return E.Cause1(ErrHTTP3Unavailable, err)
 }
 
 func (c *http3ClientImpl) DialContext(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
@@ -181,7 +248,11 @@ func (c *http3ClientImpl) OpenTunnel(ctx context.Context, request tunnelRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &http3RequestDatagramStream{stream: stream, datagramsEnabled: clientConn.Settings().EnableDatagrams}, nil
+	return &http3RequestDatagramStream{
+		stream:             stream,
+		datagramsEnabled:   clientConn.Settings().EnableDatagrams,
+		bypassIPCongestion: c.congestionControl == option.H3CongestionNone && request.protocol == "connect-ip",
+	}, nil
 }
 
 func (c *http3ClientImpl) ResetConnection() {
@@ -280,29 +351,62 @@ func (c *http3StreamConn) NeedAdditionalReadDeadline() bool {
 }
 
 type http3RequestDatagramStream struct {
-	stream           *http3.RequestStream
-	datagramsEnabled bool
+	stream             *http3.RequestStream
+	datagramsEnabled   bool
+	bypassIPCongestion bool
+	closed             atomic.Bool
 }
 
 func (s *http3RequestDatagramStream) Read(p []byte) (int, error) {
-	return s.stream.Read(p)
+	n, err := s.stream.Read(p)
+	return n, s.wrapError(err)
 }
 
 func (s *http3RequestDatagramStream) Write(p []byte) (int, error) {
-	return s.stream.Write(p)
+	n, err := s.stream.Write(p)
+	return n, s.wrapError(err)
+}
+
+func (s *http3RequestDatagramStream) wrapError(err error) error {
+	if err == nil || s.closed.Load() {
+		return err
+	}
+	var streamError *quic.StreamError
+	if errors.As(err, &streamError) && !streamError.Remote {
+		return err
+	}
+	var applicationError *quic.ApplicationError
+	if errors.As(err, &applicationError) && !applicationError.Remote {
+		return err
+	}
+	return wrapHTTP3Error(err)
 }
 
 func (s *http3RequestDatagramStream) Close() error {
+	s.closed.Store(true)
 	s.stream.SetWriteDeadline(time.Now())
 	s.stream.CancelRead(0)
 	return s.stream.Close()
 }
 
 func (s *http3RequestDatagramStream) SendDatagram(payload []byte) error {
+	return s.sendDatagram(payload, false)
+}
+
+func (s *http3RequestDatagramStream) SendIPDatagram(payload []byte) error {
+	return s.sendDatagram(payload, s.bypassIPCongestion)
+}
+
+func (s *http3RequestDatagramStream) sendDatagram(payload []byte, bypass bool) error {
 	if !s.datagramsEnabled {
 		return ErrDatagramUnsupported
 	}
-	err := s.stream.SendDatagram(payload)
+	var err error
+	if bypass {
+		err = s.stream.SendDatagramWithoutCongestionControl(payload)
+	} else {
+		err = s.stream.SendDatagram(payload)
+	}
 	if err == nil {
 		return nil
 	}
@@ -310,11 +414,15 @@ func (s *http3RequestDatagramStream) SendDatagram(payload []byte) error {
 	if errors.As(err, &tooLarge) {
 		return &DatagramTooLargeError{MaxPayloadSize: int(tooLarge.MaxDatagramPayloadSize) - VarintLen(uint64(s.stream.StreamID()/4))}
 	}
-	return err
+	return s.wrapError(err)
 }
 
 func (s *http3RequestDatagramStream) ReceiveDatagram(ctx context.Context) ([]byte, error) {
-	return s.stream.ReceiveDatagram(ctx)
+	datagram, err := s.stream.ReceiveDatagram(ctx)
+	if err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return datagram, s.wrapError(err)
 }
 
 var (

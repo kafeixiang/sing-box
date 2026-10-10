@@ -15,6 +15,8 @@ type SocksInboundOptions struct {
 	ListenOptions
 	Users          []auth.User           `json:"users,omitempty"`
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type HTTPMixedInboundOptions struct {
@@ -22,18 +24,25 @@ type HTTPMixedInboundOptions struct {
 	Users          []auth.User           `json:"users,omitempty"`
 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
 	SetSystemProxy bool                  `json:"set_system_proxy,omitempty"`
+	UDPPath        string                `json:"udp_path,omitempty"`
 	InboundTLSOptionsContainer
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type _HTTPInboundOptions struct {
+	H3CongestionControl H3CongestionControl `json:"h3_congestion_control,omitempty" enum:"new_reno,cubic,bbr"`
 	ListenOptions
 	Users          []auth.User             `json:"users,omitempty"`
 	DomainResolver *DomainResolveOptions   `json:"domain_resolver,omitempty"`
 	SetSystemProxy bool                    `json:"set_system_proxy,omitempty"`
+	UDPPath        string                  `json:"udp_path,omitempty"`
 	Version        badoption.Listable[int] `json:"version,omitempty" enum:"1,2,3"`
 	InboundTLSOptionsContainer
 	HTTP2Options HTTP2Options `json:"-"`
 	HTTP3Options QUICOptions  `json:"-"`
+
+	SpeedTest string `json:"speed_test,omitempty"`
 }
 
 type HTTPInboundOptions _HTTPInboundOptions
@@ -54,6 +63,9 @@ func (o *HTTPInboundOptions) UnmarshalJSONContext(ctx context.Context, content [
 	if err != nil {
 		return err
 	}
+	if err := o.H3CongestionControl.Validate(o.Versions(), false); err != nil {
+		return err
+	}
 	return unmarshalHTTPVersionsOptions(ctx, content, (*_HTTPInboundOptions)(o), o.Versions(), &o.HTTP2Options, &o.HTTP3Options)
 }
 
@@ -67,26 +79,37 @@ func (o HTTPInboundOptions) DescribeSchema(builder schema.Builder) (*schema.Node
 	if err != nil {
 		return nil, err
 	}
+	describeH3Congestion(node, true, false)
 	return node, nil
 }
 
 type SOCKSOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version    string             `json:"version,omitempty" enum:"4,4a,5"`
-	Username   string             `json:"username,omitempty"`
-	Password   string             `json:"password,omitempty"`
-	Network    NetworkList        `json:"network,omitempty"`
-	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
+	Version             string                `json:"version,omitempty" enum:"4,4a,5"`
+	Username            string                `json:"username,omitempty"`
+	Password            string                `json:"password,omitempty"`
+	Network             NetworkList           `json:"network,omitempty"`
+	UDPOverTCP          *UDPOverTCPOptions    `json:"udp_over_tcp,omitempty"`
+	InnerDomainResolver *DomainResolveOptions `json:"inner_domain_resolver,omitempty"`
+}
+
+func (o *SOCKSOutboundOptions) TakeInnerDomainResolverOptions() *DomainResolveOptions {
+	if o.Version != "4" {
+		return nil
+	}
+	return o.InnerDomainResolver
 }
 
 type _HTTPOutboundOptions struct {
+	H3CongestionControl H3CongestionControl `json:"h3_congestion_control,omitempty" enum:"new_reno,cubic,bbr"`
 	DialerOptions
 	ServerOptions
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
 	OutboundTLSOptionsContainer
 	Path                   string               `json:"path,omitempty"`
+	UDPPath                string               `json:"udp_path,omitempty"`
 	Headers                badoption.HTTPHeader `json:"headers,omitempty"`
 	Version                int                  `json:"version,omitempty" enum:"0,1,2,3"`
 	DisableVersionFallback bool                 `json:"disable_version_fallback,omitempty"`
@@ -105,6 +128,9 @@ func (o *HTTPOutboundOptions) UnmarshalJSONContext(ctx context.Context, content 
 	if err != nil {
 		return err
 	}
+	if err := o.H3CongestionControl.Validate([]int{o.Version}, false); err != nil {
+		return err
+	}
 	return unmarshalHTTPVersionOptions(ctx, content, (*_HTTPOutboundOptions)(o), o.Version, &o.HTTP2Options, &o.HTTP3Options)
 }
 
@@ -118,5 +144,6 @@ func (o HTTPOutboundOptions) DescribeSchema(builder schema.Builder) (*schema.Nod
 	if err != nil {
 		return nil, err
 	}
+	describeH3Congestion(node, false, false)
 	return node, nil
 }

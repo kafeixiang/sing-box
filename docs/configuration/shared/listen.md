@@ -9,7 +9,8 @@ icon: material/new-box
 !!! quote "Changes in sing-box 1.13.0"
 
     :material-plus: [disable_tcp_keep_alive](#disable_tcp_keep_alive)  
-    :material-alert: [tcp_keep_alive](#tcp_keep_alive)
+    :material-alert: [tcp_keep_alive](#tcp_keep_alive)  
+    :material-plus: [tcp_keep_alive_count](#tcp_keep_alive_count)
 
 !!! quote "Changes in sing-box 1.12.0"
 
@@ -41,6 +42,8 @@ icon: material/new-box
   "disable_tcp_keep_alive": false,
   "tcp_keep_alive": "",
   "tcp_keep_alive_interval": "",
+  "tcp_keep_alive_count": 0,
+  "udp_gso": true,
   "udp_fragment": false,
   "udp_timeout": "",
   "detour": "",
@@ -137,6 +140,24 @@ TCP keep alive interval.
 
 `75s` will be used by default.
 
+#### tcp_keep_alive_count
+
+!!! question "Since sing-box 1.13.0"
+
+TCP keep-alive probe count.
+
+Uses system default if not set or set to `0`.
+
+#### udp_gso
+
+Allow Generic Segmentation Offload for UDP replies to clients on this inbound, including quic-go based QUIC transports.
+
+Omitting this field or setting it to `true` retains automatic detection. Setting it to `false` disables send segmentation while preserving ordinary UDP batch sends and receives.
+This does not control receive-side GRO or the TUN `gso` option. Protocols using other networking engines are not controlled by this option.
+
+`SING_BOX_DISABLE_GSO=true`, read at process startup, disables GSO globally for sing UDP and quic-go.
+`QUIC_GO_DISABLE_GSO=true` continues to disable GSO only in quic-go. `udp_gso: true` cannot override these prohibitions or platform limitations.
+
 #### udp_fragment
 
 Enable UDP fragmentation.
@@ -206,3 +227,11 @@ the original packet address will be sent in the response instead of the mapped d
 
 This option is used for compatibility with clients that 
 do not support receiving UDP packets with domain addresses, such as Surge.
+
+#### proxy_protocol
+
+Parse [Proxy Protocol](https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt) in the connection header.
+
+#### proxy_protocol_accept_no_header
+
+Accept connections without Proxy Protocol header.

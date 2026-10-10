@@ -46,11 +46,14 @@ type ClientOptions struct {
 	Username               string
 	Password               string
 	Path                   string
+	UDPPath                string
 	Headers                http.Header
 	Version                int
 	DisableVersionFallback bool
+	Warp                   bool
 	HTTP2Options           option.HTTP2Options
 	HTTP3Options           option.QUICOptions
+	H3CongestionControl    option.H3CongestionControl
 }
 
 type http3Client interface {
@@ -71,9 +74,11 @@ type Client struct {
 	authorization                   string
 	host                            string
 	path                            string
+	udpTemplate                     *UDPTemplate
 	headers                         http.Header
 	version                         int
 	disableVersionFallback          bool
+	warp                            bool
 	http2Transport                  *http2.Transport
 	http2Access                     sync.Mutex
 	http2Conns                      []*http2ClientConn
@@ -133,7 +138,13 @@ func NewClient(options ClientOptions) (*Client, error) {
 		headers:                options.Headers.Clone(),
 		version:                options.Version,
 		disableVersionFallback: options.DisableVersionFallback,
+		warp:                   options.Warp,
 	}
+	udpTemplate, err := ParseUDPTemplate(options.UDPPath)
+	if err != nil {
+		return nil, E.Cause(err, "parse UDP path")
+	}
+	client.udpTemplate = udpTemplate
 	if client.headers != nil {
 		client.host = client.headers.Get("Host")
 		client.headers.Del("Host")
@@ -221,7 +232,10 @@ func (c *Client) DialContext(ctx context.Context, network string, destination M.
 		return nil, E.Extend(N.ErrUnknownNetwork, network)
 	}
 	if c.http3Available() {
-		conn, err := c.http3.DialContext(ctx, destination)
+		attemptCtx, cancel := c.http3AttemptContext(ctx)
+		conn, err := c.http3.DialContext(attemptCtx, destination)
+		err = http3AttemptError(ctx, attemptCtx, err)
+		cancel()
 		if err == nil {
 			c.clearHTTP3Broken()
 			return conn, nil
@@ -382,9 +396,13 @@ func (c *Client) ListenPacket(ctx context.Context, destination M.Socksaddr) (net
 }
 
 func (c *Client) listenPacket(ctx context.Context, destination M.Socksaddr) (N.PacketConn, error) {
+	requestURL, err := c.udpTemplate.Expand(destination)
+	if err != nil {
+		return nil, E.Cause(err, "expand UDP path")
+	}
 	conn, stream, err := c.openTunnel(ctx, tunnelRequest{
 		protocol:    connectUDPProtocol,
-		url:         connectUDPURL(destination),
+		url:         requestURL,
 		destination: destination,
 	})
 	if err != nil {

@@ -142,7 +142,9 @@ icon: material/new-box
         "user_id": [
           1000
         ],
-        "clash_mode": "direct",
+        "clash_mode": [
+          "direct"
+        ],
         "network_type": [
           "wifi"
         ],
@@ -403,7 +405,7 @@ icon: material/new-box
 
 !!! quote ""
 
-    仅在 Android 与 Apple 平台图形客户端中支持。
+    仅在 Android 与 Apple 平台图形客户端、安卓核心中支持。
 
 匹配网络类型。
 
@@ -478,11 +480,12 @@ icon: material/new-box
 
 匹配制定出站的首选路由。
 
-| 类型          | 匹配                             |
-|-------------|--------------------------------|
-| `tailscale` | 匹配 MagicDNS 域名和对端的 allowed IPs |
-| `wireguard` | 匹配对端的 allowed IPs              |
-| `bridge`    | 匹配除本机本地地址外的所有地址，仅在[预匹配](/zh/configuration/shared/pre-match/)中 |
+| 类型            | 匹配                             |
+|---------------|--------------------------------|
+| `tailscale`   | 匹配 MagicDNS 域名和对端的 allowed IPs |
+| `wireguard`   | 匹配对端的 allowed IPs              |
+| `easyconnect` | 匹配 VPN 服务器发布的资源列表前缀和域名     |
+| `bridge`      | 匹配除本机本地地址外的所有地址，仅在[预匹配](/zh/configuration/shared/pre-match/)中 |
 
 #### dns_server_address
 
@@ -498,6 +501,7 @@ icon: material/new-box
 | `tailscale`   | 匹配 tailnet 的 DNS 解析器              |
 | `openvpn`     | 匹配 VPN 服务器推送的 DNS 服务器             |
 | `openconnect` | 匹配 VPN 服务器推送的 DNS 服务器             |
+| `easyconnect` | 匹配 VPN 服务器推送的 DNS 服务器             |
 
 #### dns_search_domain
 
@@ -513,6 +517,7 @@ icon: material/new-box
 | `tailscale`   | 匹配 tailnet 的搜索域                |
 | `openvpn`     | 匹配 VPN 服务器推送的搜索域              |
 | `openconnect` | 匹配 VPN 服务器推送的搜索域              |
+| `easyconnect` | 匹配 VPN 服务器推送的搜索域              |
 
 #### source_mac_address
 

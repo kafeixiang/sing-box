@@ -12,8 +12,10 @@
   "username": "sekai",
   "password": "admin",
   "path": "",
+  "udp_path": "",
   "headers": {},
   "version": 0,
+  // "h3_congestion_control": "bbr",
   "disable_version_fallback": false,
   "tls": {},
 
@@ -48,6 +50,14 @@ Basic 认证密码。
 
 HTTP 请求路径。
 
+#### udp_path
+
+CONNECT-UDP（[RFC 9298](https://www.rfc-editor.org/rfc/rfc9298)）资源的 [RFC 6570](https://www.rfc-editor.org/rfc/rfc6570) URI 模板的路径与查询部分。
+
+默认使用 `/.well-known/masque/udp/{target_host}/{target_port}/`。
+
+模板需满足 [RFC 9298 第 2 节](https://www.rfc-editor.org/rfc/rfc9298#section-2) 的要求：包含 `target_host` 和 `target_port` 变量，以 `/` 开头，只包含 `0x21`-`0x7E` 范围内的 ASCII 字符，模板等级不高于 3，且不使用 `+`、`#`、`.`、`/`、`;` 运算符。支持简单字符串展开（`{var}`）、表单式查询展开（`{?var}`）和表单式查询续接（`{&var}`），例如 `/masque{?target_host,target_port}` 或 `/masque?h={target_host}&p={target_port}`。其他变量视为未定义。
+
 #### headers
 
 HTTP 请求的额外标头。
@@ -71,6 +81,18 @@ HTTP 版本。
 !!! question "自 sing-box 1.15.0 起"
 
 禁用自动回退到更低的 HTTP 版本。
+
+#### h3_congestion_control
+
+HTTP/3 连接的本端发送拥塞控制算法。仅在 HTTP/3 生效。
+
+支持 `new_reno`、`cubic`、`bbr`。HTTP 代理不支持 `none`，配置后将拒绝启动。
+
+省略时保留现有行为：客户端使用 NewReno，服务端使用 BBR。BBR 使用 Standard profile，不提供 profile 或带宽参数。配置仅影响本端发送，两端可以使用不同算法。
+
+配置本字段时，必须显式设置 `version: 3`。不包含 QUIC 支持的构建拒绝此配置。
+
+本字段不改变版本回退策略。客户端是否允许回退仍由 `disable_version_fallback` 控制；回退到 HTTP/1 或 HTTP/2 后，本字段不生效。
 
 #### tls
 

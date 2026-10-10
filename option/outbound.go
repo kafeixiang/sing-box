@@ -77,6 +77,14 @@ type DialerOptionsWrapper interface {
 	ReplaceDialerOptions(options DialerOptions)
 }
 
+type InnerDomainResolverOptionsWrapper interface {
+	TakeInnerDomainResolverOptions() *DomainResolveOptions
+}
+
+type DomainResolverOptionsWrapper interface {
+	TakeDomainResolverOptions() *DomainResolveOptions
+}
+
 type DialerOptions struct {
 	Detour string `json:"detour,omitempty" reference:"outbound"`
 	AbstractDialerOptions
@@ -97,8 +105,10 @@ type AbstractDialerOptions struct {
 	DisableTCPKeepAlive        bool                              `json:"disable_tcp_keep_alive,omitempty"`
 	TCPKeepAlive               badoption.Duration                `json:"tcp_keep_alive,omitempty"`
 	TCPKeepAliveInterval       badoption.Duration                `json:"tcp_keep_alive_interval,omitempty"`
+	TCPKeepAliveCount          int                               `json:"tcp_keep_alive_count,omitempty"`
 	TCPKeepAliveSystemDefaults bool                              `json:"-"`
 	UDPBindPort                uint16                            `json:"-"`
+	UDPGSO                     *bool                             `json:"udp_gso,omitempty"`
 	UDPFragment                *bool                             `json:"udp_fragment,omitempty"`
 	UDPFragmentDefault         bool                              `json:"-"`
 	DomainResolver             *DomainResolveOptions             `json:"domain_resolver,omitempty"`

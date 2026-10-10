@@ -2,6 +2,7 @@ package route
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/netip"
@@ -18,6 +19,7 @@ import (
 	"github.com/sagernet/sing-box/common/tlsfragment"
 	"github.com/sagernet/sing-box/common/tlsspoof"
 	C "github.com/sagernet/sing-box/constant"
+	snell "github.com/sagernet/sing-snell"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -100,6 +102,14 @@ func (m *ConnectionManager) TrackPacketConn(conn net.PacketConn) net.PacketConn 
 	return tracked
 }
 
+func notifyConnectionFailure(ctx context.Context, chain []adapter.Outbound) {
+	for _, outbound := range chain {
+		if listener, ok := outbound.(adapter.ConnectionFailureListener); ok {
+			listener.OnConnectionFailure(ctx)
+		}
+	}
+}
+
 func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	ctx = adapter.WithContext(ctx, &metadata)
 	var (
@@ -122,6 +132,7 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
 		if outbound, isOutbound := this.(adapter.Outbound); isOutbound {
 			dialerString = " using outbound/" + outbound.Type() + "[" + outbound.Tag() + "]"
 		}
+		notifyConnectionFailure(ctx, metadata.OutboundChain)
 		err = E.Cause(err, "open connection to ", remoteString, dialerString)
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		m.logger.ErrorContext(ctx, err)
@@ -210,6 +221,7 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 			if outbound, isOutbound := this.(adapter.Outbound); isOutbound {
 				dialerString = " using outbound/" + outbound.Type() + "[" + outbound.Tag() + "]"
 			}
+			notifyConnectionFailure(ctx, metadata.OutboundChain)
 			err = E.Cause(err, "open packet connection to ", remoteString, dialerString)
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			m.logger.ErrorContext(ctx, err)
@@ -233,7 +245,8 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 			if outbound, isOutbound := this.(adapter.Outbound); isOutbound {
 				dialerString = " using outbound/" + outbound.Type() + "[" + outbound.Tag() + "]"
 			}
-			err = E.Cause(err, "listen packet connection using ", dialerString)
+			notifyConnectionFailure(ctx, metadata.OutboundChain)
+			err = E.Cause(err, "listen packet connection", dialerString)
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			m.logger.ErrorContext(ctx, err)
 			return
@@ -243,6 +256,9 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 	if err != nil {
 		conn.Close()
 		remotePacketConn.Close()
+		if onClose != nil {
+			onClose(err)
+		}
 		m.logger.ErrorContext(ctx, "report handshake success: ", err)
 		return
 	}
@@ -316,6 +332,8 @@ func (m *ConnectionManager) connectionCopy(ctx context.Context, source net.Conn,
 	if !direction {
 		if err == nil {
 			m.logger.DebugContext(ctx, "connection upload finished")
+		} else if isSnellRemoteEOF(err) {
+			m.logger.DebugContext(ctx, "connection upload closed: ", err)
 		} else if !E.IsClosedOrCanceled(err) {
 			m.logger.ErrorContext(ctx, "connection upload closed: ", err)
 		} else {
@@ -324,12 +342,26 @@ func (m *ConnectionManager) connectionCopy(ctx context.Context, source net.Conn,
 	} else {
 		if err == nil {
 			m.logger.DebugContext(ctx, "connection download finished")
+		} else if isSnellRemoteEOF(err) {
+			m.logger.DebugContext(ctx, "connection download closed: ", err)
 		} else if !E.IsClosedOrCanceled(err) {
 			m.logger.ErrorContext(ctx, "connection download closed: ", err)
 		} else {
 			m.logger.TraceContext(ctx, "connection download closed")
 		}
 	}
+}
+
+func isSnellRemoteEOF(err error) bool {
+	// Follow single-error wrappers only. A joined error may contain another
+	// failure that must retain its normal log level.
+	for err != nil {
+		if response, ok := err.(*snell.ServerResponseError); ok {
+			return response.IsRemoteEOF()
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }
 
 func (m *ConnectionManager) kickWriteHandshake(ctx context.Context, source net.Conn, destination net.Conn, serverFirst bool, direction bool, done *atomic.Bool, onClose N.CloseHandlerFunc) bool {

@@ -2,11 +2,13 @@ package constant
 
 const (
 	TypeTun                = "tun"
+	TypeEBPF               = "ebpf"
 	TypeRedirect           = "redirect"
 	TypeTProxy             = "tproxy"
 	TypeDirect             = "direct"
 	TypeBridge             = "bridge"
 	TypeBlock              = "block"
+	TypePass               = "pass"
 	TypeDNS                = "dns"
 	TypeSOCKS              = "socks"
 	TypeHTTP               = "http"
@@ -27,6 +29,7 @@ const (
 	TypeTUIC               = "tuic"
 	TypeHysteria2          = "hysteria2"
 	TypeOpenConnect        = "openconnect"
+	TypeEasyConnect        = "easyconnect"
 	TypeOpenVPNClient      = "openvpn-client"
 	TypeOpenVPNServer      = "openvpn-server"
 	TypeMASQUEClient       = "masque-client"
@@ -46,17 +49,23 @@ const (
 	TypeHysteriaRealm      = "hysteria-realm"
 	TypeACME               = "acme"
 	TypeCloudflareOriginCA = "cloudflare-origin-ca"
+	TypeTrustTunnel        = "trusttunnel"
+
+	TypeJuicity = "juicity"
 )
 
 const (
-	TypeSelector = "selector"
-	TypeURLTest  = "urltest"
+	TypeSelector    = "selector"
+	TypeURLTest     = "urltest"
+	TypeLoadBalance = "loadbalance"
 )
 
 func ProxyDisplayName(proxyType string) string {
 	switch proxyType {
 	case TypeTun:
 		return "TUN"
+	case TypeEBPF:
+		return "eBPF"
 	case TypeRedirect:
 		return "Redirect"
 	case TypeTProxy:
@@ -67,6 +76,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "Bridge"
 	case TypeBlock:
 		return "Block"
+	case TypePass:
+		return "Pass"
 	case TypeDNS:
 		return "DNS"
 	case TypeSOCKS:
@@ -107,6 +118,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "AnyTLS"
 	case TypeOpenConnect:
 		return "OpenConnect"
+	case TypeEasyConnect:
+		return "EasyConnect"
 	case TypeOpenVPNClient:
 		return "OpenVPN Client"
 	case TypeOpenVPNServer:
@@ -121,10 +134,16 @@ func ProxyDisplayName(proxyType string) string {
 		return "Tailcat"
 	case TypeCloudflared:
 		return "Cloudflared"
+	case TypeJuicity:
+		return "Juicity"
+	case TypeTrustTunnel:
+		return "TrustTunnel"
 	case TypeSelector:
 		return "Selector"
 	case TypeURLTest:
 		return "URLTest"
+	case TypeLoadBalance:
+		return "LoadBalance"
 	default:
 		return "Unknown"
 	}

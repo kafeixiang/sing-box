@@ -37,6 +37,11 @@ type FlowOutbound interface {
 	PreMatchFlow(network string, destination netip.Addr) PreMatchAction
 }
 
+type FlowOutboundDomainResolver interface {
+	FlowOutbound
+	FlowDomainResolveOptions() DNSQueryOptions
+}
+
 type OutboundRegistry interface {
 	option.OutboundOptionsRegistry
 	CreateOutbound(ctx context.Context, router Router, logger log.ContextLogger, tag string, outboundType string, options any) (Outbound, error)
@@ -57,4 +62,12 @@ type IdleConnectionKeeper interface {
 
 type Referrer interface {
 	References() []string
+}
+
+// DynamicOutboundManager supports provider-owned components without allowing
+// duplicate tags in the static configuration.
+type DynamicOutboundManager interface {
+	OutboundManager
+	Replace(ctx context.Context, router Router, logger log.ContextLogger, tag string, componentType string, options any) error
+	Remove(tag string) error
 }

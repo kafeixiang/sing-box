@@ -4,12 +4,15 @@ import (
 	"context"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 func NewRule(ctx context.Context, logger log.ContextLogger, options option.Rule, checkOutbound bool) (adapter.Rule, error) {
@@ -57,14 +60,23 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 	if err != nil {
 		return nil, E.Cause(err, "action")
 	}
+	id, _ := uuid.NewV4()
 	rule := &DefaultRule{
 		abstractDefaultRule{
+			domainMatchStrategy: C.DomainMatchStrategy(options.DomainMatchStrategy),
+			abstractRule: abstractRule{
+				uuid:    id.String(),
+				history: service.PtrFromContext[urltest.HistoryStorage](ctx),
+			},
 			invert: options.Invert,
 			action: action,
 		},
 	}
 	router := service.FromContext[adapter.Router](ctx)
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
+	if router != nil && rule.domainMatchStrategy == C.DomainMatchStrategyAsIS {
+		rule.domainMatchStrategy = router.DefaultDomainMatchStrategy()
+	}
 	if len(options.Inbound) > 0 {
 		item := NewInboundRule(options.Inbound)
 		rule.items = append(rule.items, item)
@@ -101,7 +113,7 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.Domain) > 0 || len(options.DomainSuffix) > 0 {
-		item, err := NewDomainItem(options.Domain, options.DomainSuffix)
+		item, err := NewDomainItem(options.Domain, options.DomainSuffix, rule.domainMatchStrategy)
 		if err != nil {
 			return nil, err
 		}
@@ -109,12 +121,12 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.DomainKeyword) > 0 {
-		item := NewDomainKeywordItem(options.DomainKeyword)
+		item := NewDomainKeywordItem(options.DomainKeyword, rule.domainMatchStrategy)
 		rule.destinationAddressItems = append(rule.destinationAddressItems, item)
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.DomainRegex) > 0 {
-		item, err := NewDomainRegexItem(options.DomainRegex)
+		item, err := NewDomainRegexItem(options.DomainRegex, rule.domainMatchStrategy)
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +235,7 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
 	}
-	if options.ClashMode != "" {
+	if len(options.ClashMode) > 0 {
 		item := NewClashModeItem(ctx, options.ClashMode)
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
@@ -279,7 +291,7 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		rule.allItems = append(rule.allItems, item)
 	}
 	if len(options.PreferredBy) > 0 {
-		item := NewPreferredByItem(ctx, options.PreferredBy)
+		item := NewPreferredByItem(ctx, options.PreferredBy, rule.domainMatchStrategy)
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
 	}
@@ -306,6 +318,14 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		rule.ruleSetItem = item
 		rule.allItems = append(rule.allItems, item)
 	}
+	if len(options.TimeRange) > 0 {
+		item, err := NewTimeRangeItem(ctx, options.TimeRange, options.TimeZone)
+		if err != nil {
+			return nil, E.Cause(err, "time_range")
+		}
+		rule.items = append(rule.items, item)
+		rule.allItems = append(rule.allItems, item)
+	}
 	return rule, nil
 }
 
@@ -320,12 +340,22 @@ func NewLogicalRule(ctx context.Context, logger log.ContextLogger, options optio
 	if err != nil {
 		return nil, E.Cause(err, "action")
 	}
+	id, _ := uuid.NewV4()
 	rule := &LogicalRule{
 		abstractLogicalRule{
-			rules:  make([]adapter.HeadlessRule, len(options.Rules)),
-			invert: options.Invert,
-			action: action,
+			abstractRule: abstractRule{
+				uuid:    id.String(),
+				history: service.PtrFromContext[urltest.HistoryStorage](ctx),
+			},
+			rules:               make([]adapter.HeadlessRule, len(options.Rules)),
+			domainMatchStrategy: C.DomainMatchStrategy(options.DomainMatchStrategy),
+			invert:              options.Invert,
+			action:              action,
 		},
+	}
+	router := service.FromContext[adapter.Router](ctx)
+	if router != nil && rule.domainMatchStrategy == C.DomainMatchStrategyAsIS {
+		rule.domainMatchStrategy = router.DefaultDomainMatchStrategy()
 	}
 	switch options.Mode {
 	case C.LogicalTypeAnd:
@@ -339,6 +369,13 @@ func NewLogicalRule(ctx context.Context, logger log.ContextLogger, options optio
 		err = validateNoNestedRuleActions(subOptions, true)
 		if err != nil {
 			return nil, E.Cause(err, "sub rule[", i, "]")
+		}
+		if subOptions.Type == C.RuleTypeLogical {
+			if subOptions.LogicalOptions.DomainMatchStrategy == option.DomainMatchStrategy(C.DomainMatchStrategyAsIS) {
+				subOptions.LogicalOptions.DomainMatchStrategy = option.DomainMatchStrategy(rule.domainMatchStrategy)
+			}
+		} else if subOptions.DefaultOptions.DomainMatchStrategy == option.DomainMatchStrategy(C.DomainMatchStrategyAsIS) {
+			subOptions.DefaultOptions.DomainMatchStrategy = option.DomainMatchStrategy(rule.domainMatchStrategy)
 		}
 		subRule, err := NewRule(ctx, logger, subOptions, false)
 		if err != nil {

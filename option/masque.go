@@ -13,30 +13,39 @@ import (
 )
 
 type MASQUEEndpointOptions struct {
-	System       bool           `json:"system,omitempty"`
-	Name         string         `json:"name,omitempty"`
-	MTU          uint32         `json:"mtu,omitempty"`
-	UDPMapping   UDPNATBehavior `json:"udp_mapping,omitempty"`
-	UDPFiltering UDPNATBehavior `json:"udp_filtering,omitempty"`
-	UDPNATMax    uint32         `json:"udp_nat_max,omitempty"`
+	InnerDomainResolver *DomainResolveOptions `json:"inner_domain_resolver,omitempty"`
+	System              bool                  `json:"system,omitempty"`
+	GSO                 *bool                 `json:"gso,omitempty"`
+	Name                string                `json:"name,omitempty"`
+	MTU                 uint32                `json:"mtu,omitempty"`
+	UDPMapping          UDPNATBehavior        `json:"udp_mapping,omitempty"`
+	UDPFiltering        UDPNATBehavior        `json:"udp_filtering,omitempty"`
+	UDPNATMax           uint32                `json:"udp_nat_max,omitempty"`
+}
+
+func (o *MASQUEEndpointOptions) TakeInnerDomainResolverOptions() *DomainResolveOptions {
+	return o.InnerDomainResolver
 }
 
 type _MASQUEClientEndpointOptions struct {
+	H3CongestionControl H3CongestionControl `json:"h3_congestion_control,omitempty" enum:"new_reno,cubic,bbr,none"`
 	DialerOptions
 	ServerOptions
 	MASQUEEndpointOptions
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
 	OutboundTLSOptionsContainer
-	Path                   string               `json:"path,omitempty"`
-	Headers                badoption.HTTPHeader `json:"headers,omitempty"`
-	Version                int                  `json:"version,omitempty" enum:"0,1,2,3"`
-	DisableVersionFallback bool                 `json:"disable_version_fallback,omitempty"`
-	AdvertiseRoutes        []netip.Prefix       `json:"advertise_routes,omitempty"`
-	UDPTimeout             badoption.Duration   `json:"udp_timeout,omitempty"`
-	OnDemand               bool                 `json:"on_demand,omitempty"`
-	HTTP2Options           HTTP2Options         `json:"-"`
-	HTTP3Options           QUICOptions          `json:"-"`
+	Path                   string                           `json:"path,omitempty"`
+	Headers                badoption.HTTPHeader             `json:"headers,omitempty"`
+	Version                int                              `json:"version,omitempty" enum:"0,1,2,3"`
+	DisableVersionFallback bool                             `json:"disable_version_fallback,omitempty"`
+	Warp                   bool                             `json:"warp,omitempty"`
+	Address                badoption.Listable[netip.Prefix] `json:"address,omitempty"`
+	AdvertiseRoutes        []netip.Prefix                   `json:"advertise_routes,omitempty"`
+	UDPTimeout             badoption.Duration               `json:"udp_timeout,omitempty"`
+	OnDemand               bool                             `json:"on_demand,omitempty"`
+	HTTP2Options           HTTP2Options                     `json:"-"`
+	HTTP3Options           QUICOptions                      `json:"-"`
 }
 
 type MASQUEClientEndpointOptions _MASQUEClientEndpointOptions
@@ -57,6 +66,9 @@ func (o *MASQUEClientEndpointOptions) UnmarshalJSONContext(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	if err := o.H3CongestionControl.Validate([]int{o.ResolvedVersion()}, true); err != nil {
+		return err
+	}
 	return unmarshalHTTPVersionOptions(ctx, content, (*_MASQUEClientEndpointOptions)(o), o.ResolvedVersion(), &o.HTTP2Options, &o.HTTP3Options)
 }
 
@@ -70,16 +82,19 @@ func (o MASQUEClientEndpointOptions) DescribeSchema(builder schema.Builder) (*sc
 	if err != nil {
 		return nil, err
 	}
+	describeH3Congestion(node, false, true)
 	return node, nil
 }
 
 type _MASQUEServerEndpointOptions struct {
+	H3CongestionControl H3CongestionControl `json:"h3_congestion_control,omitempty" enum:"new_reno,cubic,bbr,none"`
 	ListenOptions
 	MASQUEEndpointOptions
 	Users   []auth.User             `json:"users,omitempty"`
 	Version badoption.Listable[int] `json:"version,omitempty" enum:"1,2,3"`
 	InboundTLSOptionsContainer
 	Path            string                           `json:"path,omitempty"`
+	Warp            bool                             `json:"warp,omitempty"`
 	Address         badoption.Listable[netip.Prefix] `json:"address"`
 	AdvertiseRoutes []netip.Prefix                   `json:"advertise_routes,omitempty"`
 	HTTP2Options    HTTP2Options                     `json:"-"`
@@ -104,6 +119,9 @@ func (o *MASQUEServerEndpointOptions) UnmarshalJSONContext(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	if err := o.H3CongestionControl.Validate(o.Versions(), true); err != nil {
+		return err
+	}
 	return unmarshalHTTPVersionsOptions(ctx, content, (*_MASQUEServerEndpointOptions)(o), o.Versions(), &o.HTTP2Options, &o.HTTP3Options)
 }
 
@@ -117,5 +135,6 @@ func (o MASQUEServerEndpointOptions) DescribeSchema(builder schema.Builder) (*sc
 	if err != nil {
 		return nil, err
 	}
+	describeH3Congestion(node, true, true)
 	return node, nil
 }

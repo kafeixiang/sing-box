@@ -17,11 +17,16 @@
   "password": "",
   "path": "",
   "headers": {},
+  "warp": false,
+  "address": [],
   "version": 0,
+  // "h3_congestion_control": "bbr",
   "disable_version_fallback": false,
   "tls": {},
   "advertise_routes": [],
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1280,
   "on_demand": false,
@@ -60,13 +65,33 @@ Basic 认证密码。
 
 ### path
 
-IP 代理资源的 URI 模板路径，可以包含 `target` 和 `ipproto` 变量。
+IP 代理资源的 [RFC 6570](https://www.rfc-editor.org/rfc/rfc6570) URI 模板的路径与查询部分。
+
+模板需满足 [RFC 9484 第 3 节](https://www.rfc-editor.org/rfc/rfc9484#section-3) 的要求：以 `/` 开头，只包含 `0x21`-`0x7E` 范围内的 ASCII 字符，模板等级不高于 3，且不使用 `+`、`#`、`.`、`/`、`;` 运算符。支持简单字符串展开（`{var}`）、表单式查询展开（`{?var}`）和表单式查询续接（`{&var}`），例如 `/masque/ip{?target,ipproto}` 或 `/masque/ip?t={target}&i={ipproto}`。
+
+`target` 和 `ipproto` 变量展开为通配符 `*`，经百分号编码后为 `%2A`。其他变量视为未定义。
 
 默认使用 `/.well-known/masque/ip/{target}/{ipproto}/`。
 
 ### headers
 
 HTTP 请求的额外标头。
+
+### warp
+
+使用 Cloudflare WARP 魔改过的 CONNECT-IP。
+
+隧道协议为 `cf-connect-ip`。未设置 `path` 时路径为 `/`，未设置 `Host` 标头时请求权威为 `cloudflareaccess.com`。不会交换地址和路由胶囊。`address` 填写设备被分配的 IPv4 和 IPv6 地址。HTTP 隧道建立后立即发送 IP 数据包。
+
+HTTP/3 还会发送草案设置 `SETTINGS_H3_DATAGRAM`（`0x276`），并使用 20 字节的 QUIC 连接 ID。数据包放在上下文标识为 0 的 QUIC 数据报里。HTTP/2 发送带 `cf-connect-proto: cf-connect-ip` 和 `pq-enabled: false` 的 `CONNECT`，数据包放在不含上下文标识的 DATAGRAM 胶囊里。HTTP/1 使用同样的胶囊。Cloudflare 的端点使用 HTTP/3 和 HTTP/2。
+
+WARP 用 TLS 客户端证书认证设备。将 `tls.server_name` 设为 `consumer-masque.cloudflareclient.com`。端点证书不是签发给这个名字的：启用 `tls.insecure`，并用 `tls.certificate_public_key_sha256` 固定端点公钥。
+
+### address
+
+隧道接口的本地地址。
+
+启用 `warp` 时必填。
 
 ### version
 
@@ -81,6 +106,22 @@ HTTP 版本。
 ### disable_version_fallback
 
 禁用自动回退到更低的 HTTP 版本。
+
+### h3_congestion_control
+
+HTTP/3 连接的本端发送拥塞控制算法。仅在 HTTP/3 生效。
+
+支持 `new_reno`、`cubic`、`bbr`、`none`。
+
+省略时保留现有行为：客户端使用 NewReno，服务端使用 BBR。BBR 使用 Standard profile，不提供 profile 或带宽参数。配置仅影响本端发送，两端可以使用不同算法。
+
+配置本字段时，`version` 必须为 `3` 或省略；`0` 按默认版本 `3` 处理。不包含 QUIC 支持的构建拒绝此配置。
+
+本字段不改变版本回退策略。客户端是否允许回退仍由 `disable_version_fallback` 控制；回退到 HTTP/1 或 HTTP/2 后，本字段不生效。
+
+`none` 仅免除承载 IP 的 QUIC DATAGRAM 包的外层拥塞窗口和 pacing。控制流、握手和可靠 Capsule 仍受正常拥塞控制；DATAGRAM 不可用时仍允许 Capsule 回退。豁免包保留 ACK、丢包追踪、路径 MTU 和资源限制，并使用 Not-ECT。
+
+使用 `none` 前应确认被代理流量具有适当的拥塞控制或部署环境具备相应的流量管理；仅知道内层是 UDP 或 KCP 并不足以判断。此选项不保证更低延迟。双向豁免需要两端分别配置。
 
 ### tls
 
@@ -101,6 +142,30 @@ HTTP/3 需要 TLS。
 需要特权且不能与已有系统接口冲突。
 
 如果禁用，sing-box 将使用内部网络栈。
+
+### gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试为系统接口启用通用分段卸载。
+
+当 `system` 为 `true` 时，默认启用。设为 `false` 可禁用。
+
+当 `system` 为 `false` 时，此选项不生效。
+
+### inner_domain_resolver
+
+指定将此 endpoint 用作出站时，解析目标域名所使用的 DNS 解析器。适用于 TCP 和 UDP。
+
+当此端点被选中用于 L3 转发时，也使用此解析器解析尚未解析的目标域名。
+
+此选项使用与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 相同的格式。
+
+未设置时，使用现有 DNS 路由规则及默认 DNS。目标为 IP 地址时不进行域名解析。
+
+此选项不影响 MASQUE 服务器地址的解析，后者仍使用拨号字段中的 `domain_resolver`。
 
 ### name
 

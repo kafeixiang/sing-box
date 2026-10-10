@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/listener"
+	"github.com/sagernet/sing-box/common/udpgso"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/service/powerreport"
@@ -31,6 +32,7 @@ var (
 )
 
 type DefaultDialer struct {
+	disableGSO             bool
 	dialer4                tfo.Dialer
 	dialer6                tfo.Dialer
 	udpDialer4             net.Dialer
@@ -141,6 +143,7 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		markFunc := networkManager.AutoRedirectOutputMarkFunc()
 		dialer.Control = control.Append(dialer.Control, markFunc)
 		listenConfig.Control = control.Append(listenConfig.Control, markFunc)
+		dialer.Control, listenConfig.Control = appendEBPFSelfBypass(networkManager, dialer.Control, listenConfig.Control)
 	}
 	if options.ReuseAddr {
 		listenConfig.Control = control.Append(listenConfig.Control, control.ReuseAddr())
@@ -179,10 +182,12 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		if keepInterval == 0 {
 			keepInterval = C.TCPKeepAliveInterval
 		}
+		keepCount := max(options.TCPKeepAliveCount, 0)
 		dialer.KeepAliveConfig = net.KeepAliveConfig{
 			Enable:   true,
 			Idle:     keepIdle,
 			Interval: keepInterval,
+			Count:    keepCount,
 		}
 	}
 	var udpFragment bool
@@ -237,6 +242,7 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		udpDialer4:             udpDialer4,
 		udpDialer6:             udpDialer6,
 		udpListener:            listenConfig,
+		disableGSO:             udpgso.Disabled(options.UDPGSO),
 		udpAddr4:               udpAddr4,
 		udpAddr6:               udpAddr6,
 		netns:                  options.NetNs,
@@ -433,8 +439,12 @@ func (d *DefaultDialer) trackConn(ctx context.Context, destination M.Socksaddr, 
 			conn.Close()
 			return nil, err
 		}
+		if d.disableGSO {
+			conn = bufio.NewUDPConnWithoutGSO(nativeConn)
+		}
 		conn = &udpConn{Conn: conn, rawConn: rawConn}
 	}
+	conn = bindEBPFSelfBypassConnLifecycle(d.networkManager, conn)
 	if d.connectionManager != nil {
 		conn = d.connectionManager.TrackConn(conn)
 	}
@@ -465,6 +475,12 @@ func (d *DefaultDialer) trackPacketConn(ctx context.Context, destination M.Socks
 	if err != nil {
 		return conn, err
 	}
+	if d.disableGSO {
+		if udpConn, loaded := conn.(*net.UDPConn); loaded {
+			conn = bufio.NewUDPConnWithoutGSO(udpConn)
+		}
+	}
+	conn = bindEBPFSelfBypassPacketConnLifecycle(d.networkManager, conn)
 	if d.connectionManager != nil {
 		conn = d.connectionManager.TrackPacketConn(conn)
 	}
@@ -548,3 +564,5 @@ func (d *DefaultDialer) dialAttribution(ctx context.Context, destination M.Socks
 	}
 	return attribution
 }
+
+func (d *DefaultDialer) DisableGSO() bool { return d.disableGSO }
