@@ -28,8 +28,8 @@ import (
 	"github.com/sagernet/sing-box/option"
 	qtls "github.com/sagernet/sing-quic"
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
@@ -134,7 +134,13 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		downloadDest = &dest2
 		var tlsConfig2 tls.Config
 		if options2.TLS != nil {
-			tlsConfig2, err = tls.NewClient(ctx, options2.Server, common.PtrValueOrDefault(options2.TLS))
+			var cl log.ContextLogger
+			if l := service.FromContext[log.ContextLogger](ctx); l != nil {
+				cl = l
+			} else {
+				cl = logger.NOP()
+			}
+			tlsConfig2, err = tls.NewClient(ctx, cl, options2.Server, common.PtrValueOrDefault(options2.TLS))
 			if err != nil {
 				return nil, err
 			}
@@ -461,12 +467,12 @@ func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, op
 		}
 		transport = &http3.Transport{
 			QUICConfig: quicConfig,
-			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (*quic.Conn, error) {
 				udpConn, dErr := dialer.DialContext(ctx, N.NetworkUDP, dest)
 				if dErr != nil {
 					return nil, dErr
 				}
-				conn, dErr := qtls.DialEarly(ctx, bufio.NewUnbindPacketConn(udpConn), udpConn.RemoteAddr(), tlsConfig, cfg)
+				conn, dErr := qtls.DialEarly(ctx, udpConn, tlsConfig, cfg)
 				if dErr != nil {
 					_ = udpConn.Close()
 					return nil, dErr

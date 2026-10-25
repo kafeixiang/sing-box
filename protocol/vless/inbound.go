@@ -5,6 +5,11 @@ import (
 	"net"
 	"os"
 
+	"encoding/base64"
+	"strconv"
+	"strings"
+
+	"github.com/sagernet/sing-box/protocol/vless/encryption"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
@@ -44,6 +49,7 @@ type Inbound struct {
 	tlsConfig  tls.ServerConfig
 	transport  adapter.V2RayServerTransport
 	references []string
+	decryption *encryption.ServerInstance
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSInboundOptions) (adapter.Inbound, error) {
@@ -92,6 +98,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 			return nil, E.Cause(err, "create server transport: ", options.Transport.Type)
 		}
 	}
+	// Parse decryption configuration
+	if options.Decryption != "" && options.Decryption != "none" {
+		decryptionConfig, err := parseServerDecryption(options.Decryption)
+		if err != nil {
+			return nil, E.Cause(err, "parse decryption")
+		}
+		inbound.decryption = &encryption.ServerInstance{}
+		if err := inbound.decryption.Init(decryptionConfig.keys, decryptionConfig.xorMode, decryptionConfig.secondsFrom, decryptionConfig.secondsTo, decryptionConfig.padding); err != nil {
+			return nil, E.Cause(err, "initialize decryption")
+		}
+		logger.Debug("decryption initialized with ", len(decryptionConfig.keys), " keys xorMode=", decryptionConfig.xorMode, " secondsFrom=", decryptionConfig.secondsFrom, " secondsTo=", decryptionConfig.secondsTo, " padding=", decryptionConfig.padding)
+	}
 	inbound.listener = listener.New(listener.Options{
 		Context:           ctx,
 		Logger:            logger,
@@ -105,6 +123,12 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
+	}
+	if h.decryption != nil {
+		scope.Add(func() error {
+			h.decryption.Close()
+			return nil
+		})
 	}
 	if h.tlsConfig != nil {
 		err := h.tlsConfig.Start()
@@ -151,6 +175,14 @@ func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 }
 
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	canSplice := h.transport == nil
+	if canSplice && h.decryption != nil && h.decryption.IsFullRandomXorMode() {
+		canSplice = false
+	}
+	h.newConnectionInternal(ctx, conn, metadata, onClose, canSplice)
+}
+
+func (h *Inbound) newConnectionInternal(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc, canSplice bool) {
 	if h.tlsConfig != nil && h.transport == nil {
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
 		if err != nil {
@@ -160,7 +192,17 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		}
 		conn = tlsConn
 	}
-	err := h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
+	// Apply decryption if configured
+	if h.decryption != nil {
+		encConn, err := h.decryption.Handshake(conn, nil)
+		if err != nil {
+			N.CloseOnHandshakeFailure(conn, onClose, err)
+			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": encryption handshake"))
+			return
+		}
+		conn = encConn
+	}
+	err := h.service.NewConnectionWithOptions(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose, canSplice)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
@@ -226,4 +268,88 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 
 func (h *Inbound) References() []string {
 	return h.references
+}
+
+type serverDecryptionConfig struct {
+	keys        [][]byte
+	xorMode     uint32
+	secondsFrom int64
+	secondsTo   int64
+	padding     string
+}
+
+func parseServerDecryption(raw string) (serverDecryptionConfig, error) {
+	var cfg serverDecryptionConfig
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return cfg, E.New("empty decryption string")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) < 4 {
+		return cfg, E.New("invalid decryption string: missing components")
+	}
+	if parts[0] != "mlkem768x25519plus" {
+		return cfg, E.New("unsupported decryption prefix: ", parts[0])
+	}
+	switch parts[1] {
+	case "native":
+		cfg.xorMode = 0
+	case "xorpub":
+		cfg.xorMode = 1
+	case "random":
+		cfg.xorMode = 2
+	default:
+		return cfg, E.New("unknown decryption mode: ", parts[1])
+	}
+
+	secondsToken := strings.TrimSpace(parts[2])
+	if secondsToken == "" {
+		return cfg, E.New("invalid decryption seconds segment")
+	}
+	trimmed := strings.TrimSuffix(secondsToken, "s")
+	if trimmed == "" {
+		return cfg, E.New("invalid decryption seconds segment")
+	}
+	values := strings.SplitN(trimmed, "-", 2)
+	secondsFrom, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return cfg, E.Cause(err, "parse decryption seconds_from")
+	}
+	cfg.secondsFrom = secondsFrom
+	if len(values) == 2 && values[1] != "" {
+		secondsTo, err := strconv.ParseInt(values[1], 10, 64)
+		if err != nil {
+			return cfg, E.Cause(err, "parse decryption seconds_to")
+		}
+		cfg.secondsTo = secondsTo
+	}
+
+	paddingPhase := true
+	var paddingParts []string
+	for _, segment := range parts[3:] {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return cfg, E.New("invalid empty segment in decryption string")
+		}
+		if paddingPhase && len(segment) < 20 {
+			paddingParts = append(paddingParts, segment)
+			continue
+		}
+		if data, err := base64.RawURLEncoding.DecodeString(segment); err == nil {
+			if len(data) == 32 || len(data) == 64 {
+				cfg.keys = append(cfg.keys, data)
+				paddingPhase = false
+				continue
+			}
+			return cfg, E.New("invalid decryption key length: ", len(data))
+		}
+		return cfg, E.New("invalid decryption key: ", segment)
+	}
+	if len(cfg.keys) == 0 {
+		return cfg, E.New("no valid decryption keys found in decryption string")
+	}
+	if len(paddingParts) > 0 {
+		cfg.padding = strings.Join(paddingParts, ".")
+	}
+	return cfg, nil
 }

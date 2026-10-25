@@ -183,6 +183,7 @@ func New(options Options) (*Box, error) {
 		return nil, E.Cause(err, "create log factory")
 	}
 	service.MustRegister[log.Factory](ctx, logFactory)
+	service.MustRegister[log.ContextLogger](ctx, logFactory.Logger())
 
 	var internalServices []adapter.LifecycleService
 	routeOptions := common.PtrValueOrDefault(options.Route)
