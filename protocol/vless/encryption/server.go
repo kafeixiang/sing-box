@@ -35,6 +35,7 @@ type ServerInstance struct {
 
 	RWLock   sync.RWMutex
 	Closed   bool
+	stop     chan struct{}
 	Lasts    map[int64][16]byte
 	Tickets  [][16]byte
 	Sessions map[[16]byte]*ServerSession
@@ -79,28 +80,35 @@ func (i *ServerInstance) Init(nfsSKeysBytes [][]byte, xorMode uint32, secondsFro
 		i.Lasts = make(map[int64][16]byte)
 		i.Tickets = make([][16]byte, 0, 1024)
 		i.Sessions = make(map[[16]byte]*ServerSession)
+		i.stop = make(chan struct{})
 		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
 			for {
-				time.Sleep(time.Minute)
-				i.RWLock.Lock()
-				if i.Closed {
-					i.RWLock.Unlock()
+				select {
+				case <-i.stop:
 					return
-				}
-				minute := time.Now().Unix() / 60
-				last := i.Lasts[minute]
-				delete(i.Lasts, minute)
-				delete(i.Lasts, minute-1) // for insurance
-				if last != [16]byte{} {
-					for j, ticket := range i.Tickets {
-						delete(i.Sessions, ticket)
-						if ticket == last {
-							i.Tickets = i.Tickets[j+1:]
-							break
+				case <-ticker.C:
+					i.RWLock.Lock()
+					if i.Closed {
+						i.RWLock.Unlock()
+						return
+					}
+					minute := time.Now().Unix() / 60
+					last := i.Lasts[minute]
+					delete(i.Lasts, minute)
+					delete(i.Lasts, minute-1) // for insurance
+					if last != [16]byte{} {
+						for j, ticket := range i.Tickets {
+							delete(i.Sessions, ticket)
+							if ticket == last {
+								i.Tickets = i.Tickets[j+1:]
+								break
+							}
 						}
 					}
+					i.RWLock.Unlock()
 				}
-				i.RWLock.Unlock()
 			}
 		}()
 	}
@@ -109,7 +117,12 @@ func (i *ServerInstance) Init(nfsSKeysBytes [][]byte, xorMode uint32, secondsFro
 
 func (i *ServerInstance) Close() (err error) {
 	i.RWLock.Lock()
-	i.Closed = true
+	if !i.Closed {
+		i.Closed = true
+		if i.stop != nil {
+			close(i.stop)
+		}
+	}
 	i.RWLock.Unlock()
 	return
 }

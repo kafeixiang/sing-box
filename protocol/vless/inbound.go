@@ -311,13 +311,13 @@ func parseServerDecryption(raw string) (serverDecryptionConfig, error) {
 		return cfg, E.New("invalid decryption seconds segment")
 	}
 	values := strings.SplitN(trimmed, "-", 2)
-	secondsFrom, err := strconv.ParseInt(values[0], 10, 64)
+	secondsFrom, err := strconv.ParseInt(strings.TrimSuffix(values[0], "s"), 10, 64)
 	if err != nil {
 		return cfg, E.Cause(err, "parse decryption seconds_from")
 	}
 	cfg.secondsFrom = secondsFrom
 	if len(values) == 2 && values[1] != "" {
-		secondsTo, err := strconv.ParseInt(values[1], 10, 64)
+		secondsTo, err := strconv.ParseInt(strings.TrimSuffix(values[1], "s"), 10, 64)
 		if err != nil {
 			return cfg, E.Cause(err, "parse decryption seconds_to")
 		}

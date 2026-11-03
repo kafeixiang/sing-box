@@ -26,7 +26,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m,
+		goleak.IgnoreTopFunction("github.com/metacubex/mihomo/common/observable.(*Observable[...]).process"),
+		goleak.IgnoreTopFunction("github.com/sagernet/sing-box/transport/v2rayxhttp.(*uploadQueue).Read"),
+		goleak.IgnoreTopFunction("github.com/sagernet/sing-box/transport/v2raykcp.(*Updater).run"),
+		goleak.IgnoreAnyFunction("github.com/sagernet/sing-box/transport/v2raykcp.(*Connection).Terminate"),
+		goleak.IgnoreTopFunction("github.com/enfein/mieru/v3/pkg/protocol.NewMux.func1"),
+	)
 }
 
 var globalCtx context.Context

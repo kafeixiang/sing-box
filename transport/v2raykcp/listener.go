@@ -1,6 +1,7 @@
 package v2raykcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/cipher"
 	"crypto/rand"
@@ -89,7 +90,8 @@ func (s *Server) ServePacket(listener net.PacketConn) error {
 			return err
 		}
 
-		go s.handlePacket(buffer[:n], remoteAddr)
+		packet := bytes.Clone(buffer[:n])
+		go s.handlePacket(packet, remoteAddr)
 	}
 }
 
