@@ -12,6 +12,7 @@ replace (
 	github.com/sagernet/sing-quic => github.com/reF1nd/sing-quic v0.7.2-0.20261025120135-9783393d09e9
 	github.com/sagernet/sing-snell => github.com/reF1nd/sing-snell v0.0.0-20261023074937-e056cb336137
 	github.com/sagernet/sing-tun => github.com/reF1nd/sing-tun v0.9.7-0.20261023142205-68a8ad81087d
+	github.com/sagernet/sing-vmess => github.com/xchacha20-poly1305/sing-vmess v0.2.9-0.20261120142420-bb1b0c7028c2
 	github.com/sagernet/tailscale => github.com/reF1nd/tailscale v1.102.1-sing-box-1.14-mod.5.0.20261023130017-22d26a5ce74c
 	github.com/sagernet/wireguard-go => github.com/reF1nd/wireguard-go v0.0.8-0.20261025115602-efd86415af1a
 )
@@ -32,14 +33,16 @@ require (
 	github.com/sagernet/sing-tun v0.9.7-0.20261023115453-611d83b7a57b
 	github.com/sagernet/tailscale v1.102.1-sing-box-1.14-mod.5.0.20261022222424-1688b52f8204
 	github.com/spyzhov/ajson v0.9.4
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	go.uber.org/goleak v1.3.0
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745
 	golang.org/x/net v0.57.0
 )
 
 require (
+	filippo.io/age v1.3.1 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/CHIZI-0618/sing-ebpf v0.1.0-alpha.13.0.20261020173703-baddc865aa11 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
@@ -60,7 +63,6 @@ require (
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
-	github.com/cretz/bine v0.2.0 // indirect
 	github.com/database64128/netx-go v0.1.1 // indirect
 	github.com/database64128/tfo-go/v2 v2.3.3 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
@@ -69,6 +71,7 @@ require (
 	github.com/distribution/reference v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
+	github.com/exclavenetwork/sing-juicity v0.3.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -114,7 +117,7 @@ require (
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/mdlayher/wifi v0.9.0 // indirect
-	github.com/metacubex/utls v1.8.7 // indirect
+	github.com/metacubex/utls v1.8.8-0.20260726052843-7adb2156aad6 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
@@ -176,7 +179,7 @@ require (
 	github.com/sagernet/sing-openconnect v0.1.1-0.20260929151226-29757281a247 // indirect
 	github.com/sagernet/sing-shadowtls v0.2.2-0.20260928201441-a9c0127d5c99 // indirect
 	github.com/sagernet/sing-usbip v0.0.0-20260817040617-28bd42667eca // indirect
-	github.com/sagernet/sing-vmess v0.2.9-0.20261019223527-a0c58542bd9d // indirect
+	github.com/sagernet/sing-vmess v0.2.9-0.20261023013235-baaa53dfeba8 // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/wireguard-go v0.0.8-0.20261022215849-fdf0ad046586 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
@@ -195,6 +198,8 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/xchacha20-poly1305/sing-easyconnect v0.0.0-20260920130336-50752d75289c // indirect
+	github.com/xchacha20-poly1305/sing-trusttunnel v0.3.3-0.20260928134000-daacc8079caf // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -206,6 +211,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
@@ -224,6 +230,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.1 // indirect
-	lukechampine.com/blake3 v1.3.0 // indirect
+	lukechampine.com/blake3 v1.4.1 // indirect
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
