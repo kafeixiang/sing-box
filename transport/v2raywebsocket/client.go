@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/badhttp"
 	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/common/vision"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/buf"
@@ -77,6 +78,9 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 	conn, err := c.dialer.DialContext(ctx, N.NetworkTCP, c.serverAddr)
 	if err != nil {
 		return nil, err
+	}
+	if hook, ok := vision.HookFromContext(ctx); ok {
+		hook(conn)
 	}
 	if c.maxEarlyData > 0 {
 		return &EarlyWebsocketConn{Client: c, rawConn: conn, create: make(chan struct{})}, nil

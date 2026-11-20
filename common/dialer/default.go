@@ -26,6 +26,8 @@ import (
 	"github.com/database64128/tfo-go/v2"
 )
 
+var DoNotSelectInterface = false
+
 var (
 	_ ParallelInterfaceDialer = (*DefaultDialer)(nil)
 	_ UDPListener             = (*DefaultDialer)(nil)
@@ -287,7 +289,7 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 	} else if address.IsDomain() {
 		return nil, E.New("domain not resolved")
 	}
-	if d.networkStrategy == nil {
+	if DoNotSelectInterface || d.networkStrategy == nil {
 		if d.netns == "" && address.Addr.Zone() == "" && isLinkScoped(address.Addr) {
 			if d.bindInterface != "" {
 				address.Addr = address.Addr.WithZone(d.bindInterface)
@@ -375,7 +377,7 @@ func (d *DefaultDialer) DialParallelInterface(ctx context.Context, network strin
 }
 
 func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if d.networkStrategy == nil {
+	if DoNotSelectInterface || d.networkStrategy == nil {
 		packetConn, err := listener.ListenNetworkNamespace[net.PacketConn](ctx, d.netns, func() (net.PacketConn, error) {
 			listenConfig := d.udpListener
 			if d.autoDetectBindFunc != nil {
