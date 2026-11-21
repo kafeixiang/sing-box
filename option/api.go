@@ -14,6 +14,7 @@ type APIServiceOptions struct {
 	AccessControlAllowOrigin         badoption.Listable[string] `json:"access_control_allow_origin,omitempty" examples:"http://sing-box-dashboard.sagernet.org/,https://sing-box-dashboard.sagernet.org/"`
 	AccessControlAllowPrivateNetwork bool                       `json:"access_control_allow_private_network,omitempty"`
 	Dashboard                        *APIDashboardOptions       `json:"dashboard,omitempty"`
+	DNS                              *ApiDnsOptions             `json:"dns,omitempty"`
 	InboundTLSOptionsContainer
 }
 
