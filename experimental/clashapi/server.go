@@ -3,22 +3,26 @@ package clashapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/sagernet/cors"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/doh"
 	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental"
 	"github.com/sagernet/sing-box/experimental/clashmode"
+	"github.com/sagernet/sing-box/experimental/observability"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -46,18 +50,30 @@ type Server struct {
 	router         adapter.Router
 	dnsRouter      adapter.DNSRouter
 	outbound       adapter.OutboundManager
+	provider       adapter.ProviderManager
 	endpoint       adapter.EndpointManager
 	logger         log.Logger
 	httpServer     *http.Server
 	trafficManager *trafficcontrol.Manager
+	observability  observability.Service
 	urlTestHistory *urltest.HistoryStorage
 	clashMode      *clashmode.Manager
 	logDebug       bool
 
-	externalController       bool
-	externalUI               string
-	externalUIDownloadURL    string
-	externalUIDownloadDetour string
+	externalController        bool
+	externalUI                string
+	externalUIDownloadURL     string
+	externalUIDownloadURLHash [32]byte
+	externalUIHTTPClient      *option.HTTPClientOptions
+	externalUITransport       adapter.HTTPTransport
+	externalUIDownloadDetour  string
+	externalUIUpdateInterval  time.Duration
+	cacheFile                 adapter.CacheFile
+	lastEtag                  string
+	lastUpdated               time.Time
+	updateAccess              sync.Mutex
+	updateCancel              context.CancelFunc
+	updateDone                chan struct{}
 }
 
 func NewServer(ctx context.Context, logFactory log.ObservableFactory, options option.ClashAPIOptions) (adapter.LifecycleService, error) {
@@ -74,24 +90,40 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 		return nil, E.New("missing clash mode manager")
 	}
 	chiRouter := chi.NewRouter()
+	updateInterval := max(time.Duration(options.ExternalUIUpdateInterval), 0)
+	if updateInterval > 0 && updateInterval < time.Hour {
+		updateInterval = time.Hour
+	}
+	downloadURL := options.ExternalUIDownloadURL
+	if downloadURL == "" {
+		downloadURL = defaultExternalUIDownloadURL
+	}
 	s := &Server{
 		ctx:       ctx,
 		network:   service.FromContext[adapter.NetworkManager](ctx),
 		router:    service.FromContext[adapter.Router](ctx),
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
 		outbound:  service.FromContext[adapter.OutboundManager](ctx),
+		provider:  service.FromContext[adapter.ProviderManager](ctx),
 		endpoint:  service.FromContext[adapter.EndpointManager](ctx),
 		logger:    logFactory.NewLogger("clash-api"),
 		httpServer: &http.Server{
 			Addr:    options.ExternalController,
 			Handler: chiRouter,
 		},
-		trafficManager:           trafficManager,
-		urlTestHistory:           urlTestHistory,
-		clashMode:                clashMode,
-		logDebug:                 logFactory.Level() >= log.LevelDebug,
-		externalController:       options.ExternalController != "",
-		externalUIDownloadURL:    options.ExternalUIDownloadURL,
+		trafficManager:            trafficManager,
+		observability:             service.FromContext[observability.Service](ctx),
+		urlTestHistory:            urlTestHistory,
+		clashMode:                 clashMode,
+		logDebug:                  logFactory.Level() >= log.LevelDebug,
+		externalController:        options.ExternalController != "",
+		externalUIDownloadURL:     downloadURL,
+		externalUIDownloadURLHash: sha256.Sum256([]byte(downloadURL)),
+		externalUIHTTPClient:      options.ExternalUIHTTPClient,
+		externalUIUpdateInterval:  updateInterval,
+		cacheFile:                 service.FromContext[adapter.CacheFile](ctx),
+
+		//nolint:staticcheck
 		externalUIDownloadDetour: options.ExternalUIDownloadDetour,
 	}
 	//goland:noinspection GoDeprecation
@@ -112,24 +144,54 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 	})
 	chiRouter.Use(cors.Handler)
 	chiRouter.Group(func(r chi.Router) {
-		r.Use(authentication(options.Secret))
+		r.Use(authentication(options.Secret, true))
 		r.Get("/", hello(options.ExternalUI != ""))
 		r.Get("/logs", getLogs(s.ctx, logFactory))
 		r.Get("/traffic", traffic(s.ctx, trafficManager))
 		r.Get("/version", version)
 		r.Mount("/configs", configRouter(s, logFactory))
 		r.Mount("/proxies", proxyRouter(s, s.router))
-		r.Mount("/rules", ruleRouter(s.router))
+		r.Mount("/rules", ruleRouter(s.router, s.dnsRouter))
 		r.Mount("/connections", connectionRouter(s.ctx, s.network, trafficManager))
-		r.Mount("/providers/proxies", proxyProviderRouter())
-		r.Mount("/providers/rules", ruleProviderRouter())
+		if s.observability != nil {
+			r.Mount("/observability/v1", s.observability.Handler())
+		}
+		r.Mount("/providers/proxies", proxyProviderRouter(s))
+		r.Mount("/providers/rules", ruleProviderRouter(s.router))
 		r.Mount("/script", scriptRouter())
 		r.Mount("/profile", profileRouter())
 		r.Mount("/cache", cacheRouter(ctx))
 		r.Mount("/dns", dnsRouter(s.dnsRouter))
 
+		if service.FromContext[adapter.PlatformInterface](ctx) == nil {
+			r.Mount("/restart", restartRouter(ctx, logFactory))
+		}
+
 		s.setupMetaAPI(r)
 	})
+	if dns := options.DNS; dns != nil && options.DNS.Enabled {
+		path, err := doh.ResolvePath(options.DNS.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, subtree := range []string{"/ui", "/restart", "/observability/v1"} {
+			err := doh.CheckPathConflict(path, subtree)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, route := range chiRouter.Routes() {
+			if subtree, mounted := strings.CutSuffix(route.Pattern, "/*"); mounted {
+				err := doh.CheckPathConflict(path, subtree)
+				if err != nil {
+					return nil, err
+				}
+			} else if path == route.Pattern {
+				return nil, E.New("doh.path ", path, " conflicts with ", route.Pattern)
+			}
+		}
+		chiRouter.With(authentication(options.Secret, false)).Handle(path, doh.NewHandler(s.dnsRouter, path, "", ""))
+	}
 	if options.ExternalUI != "" {
 		s.externalUI = filemanager.BasePath(ctx, os.ExpandEnv(options.ExternalUI))
 		_, err := filemanager.ReadDir(ctx, s.externalUI)
@@ -149,11 +211,38 @@ func (s *Server) Name() string {
 }
 
 func (s *Server) Start(stage adapter.StartStage, scope *adapter.Scope) error {
-	if stage != adapter.StartStateStarted {
-		return nil
-	}
-	if s.externalController {
-		s.checkAndDownloadExternalUI()
+	switch stage {
+	case adapter.StartStateStart:
+		if s.externalController && s.externalUI != "" {
+			transport, err := s.resolveExternalUITransport()
+			if err != nil {
+				return E.Cause(err, "create external UI http client")
+			}
+			s.externalUITransport = transport
+		}
+	case adapter.StartStateStarted:
+		if !s.externalController {
+			break
+		}
+		s.ctx, s.updateCancel = context.WithCancel(s.ctx)
+		scope.Add(s.closeUpdate)
+		var forceUpdate bool
+		if s.externalUI != "" && s.cacheFile != nil {
+			if savedExternalUI := s.cacheFile.LoadExternalUI("ExternalUI"); savedExternalUI != nil {
+				if !externalUICacheMatchesURL(savedExternalUI, s.externalUIDownloadURLHash) {
+					s.logger.Info("cached external UI was downloaded from another URL, will refetch")
+					forceUpdate = true
+				} else {
+					s.lastUpdated = savedExternalUI.LastUpdated
+					s.lastEtag = savedExternalUI.LastEtag
+				}
+			}
+		}
+		s.checkAndDownloadExternalUI(forceUpdate)
+		if s.externalUI != "" && s.externalUIUpdateInterval > 0 {
+			s.updateDone = make(chan struct{})
+			go s.loopUpdate()
+		}
 		var (
 			listener net.Listener
 			err      error
@@ -181,7 +270,41 @@ func (s *Server) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	return nil
 }
 
-func authentication(serverSecret string) func(next http.Handler) http.Handler {
+func externalUICacheMatchesURL(savedExternalUI *adapter.SavedBinary, downloadURLHash [32]byte) bool {
+	return len(savedExternalUI.URLHash) == 0 || bytes.Equal(savedExternalUI.URLHash, downloadURLHash[:])
+}
+
+func (s *Server) loopUpdate() {
+	defer close(s.updateDone)
+	ticker := time.NewTicker(s.externalUIUpdateInterval)
+	defer ticker.Stop()
+	s.updateAccess.Lock()
+	due := time.Since(s.lastUpdated) > s.externalUIUpdateInterval
+	s.updateAccess.Unlock()
+	if due {
+		s.checkAndDownloadExternalUI(true)
+	}
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkAndDownloadExternalUI(true)
+		}
+	}
+}
+
+func (s *Server) closeUpdate() error {
+	if s.updateCancel != nil {
+		s.updateCancel()
+	}
+	if s.updateDone != nil {
+		<-s.updateDone
+	}
+	return nil
+}
+
+func authentication(serverSecret string, allowWebSocketToken bool) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			if serverSecret == "" {
@@ -190,7 +313,7 @@ func authentication(serverSecret string) func(next http.Handler) http.Handler {
 			}
 
 			// Browser websocket not support custom header
-			if r.Header.Get("Upgrade") == "websocket" && r.URL.Query().Get("token") != "" {
+			if allowWebSocketToken && r.Header.Get("Upgrade") == "websocket" && r.URL.Query().Get("token") != "" {
 				token := r.URL.Query().Get("token")
 				if token != serverSecret {
 					render.Status(r, http.StatusUnauthorized)

@@ -18,6 +18,12 @@ icon: material/new-box
     :material-plus: [network_is_expensive](#network_is_expensive)  
     :material-plus: [network_is_constrained](#network_is_constrained)
 
+### domain_match_strategy
+
+Source-format default and logical rules support `domain_match_strategy`. Logical rules pass their strategy to children that do not specify one; otherwise the route-level default applies.
+
+The current binary rule-set format cannot preserve an explicit strategy. Compiling such rules returns an error; use source format. On iOS, these source rules remain in memory instead of being converted to mmap storage.
+
 ### Structure
 
 !!! question "Since sing-box 1.8.0"
@@ -46,6 +52,7 @@ icon: material/new-box
       "domain_regex": [
         "^stun\\..+"
       ],
+      "domain_is_ech": true,
       "source_ip_cidr": [
         "10.0.0.0/24",
         "192.168.0.1"
@@ -167,6 +174,10 @@ Match domain using keyword.
 
 Match domain using regular expression.
 
+#### domain_is_ech
+
+Match a sniffed [ECH public name](../route/rule.md#domain_is_ech) in route rules. Available in source rule-sets only.
+
 #### source_ip_cidr
 
 Match source IP CIDR.
@@ -237,7 +248,7 @@ Match android package name using regular expression.
 
 !!! quote ""
 
-    Only supported in graphical clients on Android and Apple platforms.
+    Only supported in graphical clients on Android and Apple platforms and in the Android core.
 
 Match network type.
 

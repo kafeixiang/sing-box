@@ -38,21 +38,28 @@ func newDeviceOptions(ctx context.Context, logger log.ContextLogger, handler tun
 	if udpTimeout == 0 {
 		udpTimeout = C.UDPTimeout
 	}
+	gso := options.System
+	if options.GSO != nil {
+		gso = *options.GSO
+	}
+
 	return &device.Options{
-		Context:             ctx,
-		Logger:              logger,
-		System:              options.System,
-		Handler:             handler,
-		UDPTimeout:          udpTimeout,
-		ICMPTimeout:         C.ICMPTimeout,
-		UDPMapping:          tun.NATMapping(options.UDPMapping),
-		UDPFiltering:        tun.NATFiltering(options.UDPFiltering),
-		UDPNATMax:           options.UDPNATMax,
-		InterfaceFinder:     service.FromContext[adapter.NetworkManager](ctx).InterfaceFinder(),
-		Name:                options.Name,
-		NamePrefix:          "masque",
-		MTU:                 options.MTU,
-		PacketFrontHeadroom: masque.PacketHeadroom,
+		TCPCongestionControl: string(options.TCPCongestionControl),
+		Context:              ctx,
+		Logger:               logger,
+		System:               options.System,
+		GSO:                  gso,
+		Handler:              handler,
+		UDPTimeout:           udpTimeout,
+		ICMPTimeout:          C.ICMPTimeout,
+		UDPMapping:           tun.NATMapping(options.UDPMapping),
+		UDPFiltering:         tun.NATFiltering(options.UDPFiltering),
+		UDPNATMax:            options.UDPNATMax,
+		InterfaceFinder:      service.FromContext[adapter.NetworkManager](ctx).InterfaceFinder(),
+		Name:                 options.Name,
+		NamePrefix:           "masque",
+		MTU:                  options.MTU,
+		PacketFrontHeadroom:  masque.PacketHeadroom,
 		Configuration: device.Configuration{
 			MTU:     options.MTU,
 			Address: address,

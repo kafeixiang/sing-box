@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/proxyproto"
 	"github.com/sagernet/sing-box/common/redir"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -20,16 +21,13 @@ import (
 )
 
 func (l *Listener) ListenTCP() (net.Listener, error) {
-	//nolint:staticcheck
-	if l.listenOptions.ProxyProtocol || l.listenOptions.ProxyProtocolAcceptNoHeader {
-		return nil, E.New("Proxy Protocol is deprecated and removed in sing-box 1.6.0")
-	}
 	var err error
 	bindAddr := M.SocksaddrFrom(l.listenOptions.Listen.Build(netip.AddrFrom4([4]byte{127, 0, 0, 1})), l.listenOptions.ListenPort)
 	var (
 		listenConfig    net.ListenConfig
 		followInterface func(conn syscall.Conn)
 	)
+	listenConfig.Control = control.Append(listenConfig.Control, l.socketControl)
 	if l.listenOptions.BindInterface != "" {
 		var bindFunc control.Func
 		bindFunc, followInterface = l.followBindInterface()
@@ -53,10 +51,12 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 		if keepInterval == 0 {
 			keepInterval = C.TCPKeepAliveInterval
 		}
+		keepCount := max(l.listenOptions.TCPKeepAliveCount, 0)
 		listenConfig.KeepAliveConfig = net.KeepAliveConfig{
 			Enable:   true,
 			Idle:     keepIdle,
 			Interval: keepInterval,
+			Count:    keepCount,
 		}
 	}
 	if l.listenOptions.TCPMultiPath {
@@ -84,17 +84,23 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 	if followInterface != nil {
 		followInterface(tcpListener.(syscall.Conn))
 	}
-	l.logger.Info("tcp server started at ", tcpListener.Addr())
+	if l.listenOptions.ProxyProtocol {
+		tcpListener = &proxyproto.Listener{
+			Listener:       tcpListener,
+			AcceptNoHeader: l.listenOptions.ProxyProtocolAcceptNoHeader,
+			Logger:         l.logger,
+		}
+	}
+	if !l.disableLog {
+		l.logger.Info("tcp server started at ", tcpListener.Addr())
+	}
 	l.tcpListener = tcpListener
 	return tcpListener, err
 }
 
 func (l *Listener) loopTCPIn() {
 	tcpListener := l.tcpListener
-	var (
-		metadata    adapter.InboundContext
-		acceptDelay time.Duration
-	)
+	var acceptDelay time.Duration
 	for {
 		conn, err := tcpListener.Accept()
 		if err != nil {
@@ -117,12 +123,19 @@ func (l *Listener) loopTCPIn() {
 			return
 		}
 		acceptDelay = 0
-		//nolint:staticcheck
-		metadata.InboundDetour = l.listenOptions.Detour
-		metadata.Source = M.SocksaddrFromNet(conn.RemoteAddr()).Unwrap()
-		metadata.OriginDestination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
-		ctx := log.ContextWithNewID(l.ctx)
-		l.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
-		go l.connHandler.NewConnection(ctx, conn, metadata, nil)
+		go l.handleTCPConnection(conn)
 	}
+}
+
+func (l *Listener) handleTCPConnection(conn net.Conn) {
+	ctx := log.ContextWithNewID(l.ctx)
+	var metadata adapter.InboundContext
+	//nolint:staticcheck
+	metadata.InboundDetour = l.listenOptions.Detour
+	metadata.Source = M.SocksaddrFromNet(conn.RemoteAddr()).Unwrap()
+	metadata.OriginDestination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
+	if !l.disableLog {
+		l.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
+	}
+	l.connHandler.NewConnection(ctx, conn, metadata, nil)
 }

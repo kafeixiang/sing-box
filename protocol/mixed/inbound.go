@@ -8,6 +8,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
+	"github.com/sagernet/sing-box/common/speedtest"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/uot"
 	C "github.com/sagernet/sing-box/constant"
@@ -48,9 +49,13 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	} else {
 		udpTimeout = C.UDPTimeout
 	}
+	udpTemplate, err := http.ParseUDPTemplate(options.UDPPath)
+	if err != nil {
+		return nil, E.Cause(err, "parse udp_path")
+	}
 	inbound := &Inbound{
 		Adapter:       inbound.NewAdapter(C.TypeMixed, tag),
-		router:        uot.NewRouter(router, logger),
+		router:        uot.NewRouter(speedtest.NewRouter(router, logger, speedtest.ParseHandleOption(options.SpeedTest)), logger),
 		logger:        logger,
 		authenticator: auth.NewAuthenticator(options.Users),
 		udpTimeout:    udpTimeout,
@@ -61,6 +66,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		HTTP1:         true,
 		HTTP2:         true,
 		UDP:           true,
+		UDPTemplate:   udpTemplate,
 	})
 	if options.TLS != nil {
 		tlsConfig, err := tls.NewServerWithOptions(tls.ServerOptions{

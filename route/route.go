@@ -1,6 +1,7 @@
 package route
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/interrupt"
 	"github.com/sagernet/sing-box/common/sniff"
+	"github.com/sagernet/sing-box/common/speedtest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	R "github.com/sagernet/sing-box/route/rule"
@@ -38,6 +40,8 @@ var defaultPacketSniffers = []sniff.PacketSniffer{
 	sniff.UDPTracker,
 	sniff.DTLSRecord,
 	sniff.NTP,
+	// Fall back to the short-header heuristic after more specific sniffers.
+	sniff.QUICShortHeader,
 }
 
 // Deprecated: use RouteConnectionEx instead.
@@ -95,6 +99,8 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 		return E.New("global UoT not supported since sing-box v1.7.0.")
 	case uot.LegacyMagicAddress:
 		return E.New("global UoT (legacy) not supported since sing-box v1.7.0.")
+	case speedtest.MagicAddress:
+		return E.New("invalid speedtest request")
 	}
 	if metadata.InboundType == C.TypeTun && metadata.Protocol == C.ProtocolDNS {
 		N.CloseOnHandshakeFailure(conn, onClose, r.hijackDNSStream(ctx, conn, metadata))
@@ -145,7 +151,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	if selectedRule == nil {
 		selectedOutbound = r.outbound.Default()
 	}
-	chain, err := resolveOutbound(selectedOutbound, N.NetworkTCP)
+	chain, err := resolveOutbound(selectedOutbound, N.NetworkTCP, &metadata)
 	if err != nil {
 		buf.ReleaseMulti(buffers)
 		return err
@@ -162,7 +168,9 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
 	ctx = interrupt.ContextWithIsExternalConnection(ctx, true)
-	onClose = registerInterrupt(chain, conn, onClose)
+	if !interrupt.IsResourceDownloadFromContext(ctx) {
+		onClose = registerInterrupt(chain, conn, onClose)
+	}
 	outbound := chain[len(chain)-1]
 	if outboundHandler, isHandler := outbound.(adapter.ConnectionHandler); isHandler {
 		outboundHandler.NewConnection(ctx, conn, metadata, onClose)
@@ -172,14 +180,40 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	return nil
 }
 
-func resolveOutbound(outbound adapter.Outbound, network string) ([]adapter.Outbound, error) {
+// Pass applies to a direct route target or the selected member of one selector,
+// matching the pass outbound's routing semantics without consuming dynamic selection.
+func isPassOutbound(manager adapter.OutboundManager, tag string) bool {
+	if tag == "" {
+		return false
+	}
+	outbound, loaded := manager.Outbound(tag)
+	if !loaded || outbound == nil {
+		return false
+	}
+	if outbound.Type() == C.TypeSelector {
+		group, ok := outbound.(adapter.OutboundGroup)
+		if !ok {
+			return false
+		}
+		outbound = group.Selected(N.NetworkTCP)
+	}
+	return outbound != nil && outbound.Type() == C.TypePass
+}
+
+func resolveOutbound(outbound adapter.Outbound, network string, metadata *adapter.InboundContext) ([]adapter.Outbound, error) {
 	chain := []adapter.Outbound{outbound}
 	for {
 		group, isGroup := outbound.(adapter.OutboundGroup)
 		if !isGroup {
 			break
 		}
-		outbound = group.Selected(network)
+		if connectionGroup, ok := group.(adapter.ConnectionOutboundGroup); ok {
+			selectionMetadata := *metadata
+			selectionMetadata.Network = network
+			outbound = connectionGroup.SelectConnection(&selectionMetadata)
+		} else {
+			outbound = group.Selected(network)
+		}
 		if outbound == nil {
 			return nil, E.New(strings.ToUpper(network), " is not supported by outbound: ", group.Tag())
 		}
@@ -302,7 +336,7 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	if selectedRule == nil || selectReturn {
 		selectedOutbound = r.outbound.Default()
 	}
-	chain, err := resolveOutbound(selectedOutbound, N.NetworkUDP)
+	chain, err := resolveOutbound(selectedOutbound, N.NetworkUDP, &metadata)
 	if err != nil {
 		N.ReleaseMultiPacketBuffer(packetBuffers)
 		return err
@@ -319,11 +353,14 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
-	if metadata.FakeIP {
+	if metadata.FakeIP || metadata.DestOverride {
 		conn = newFakeIPNATPacketConn(bufio.NewNetPacketConn(conn), metadata.OriginDestination, metadata.Destination)
 	}
+	onClose = r.wrapQUICSniffIdleCache(metadata, onClose)
 	ctx = interrupt.ContextWithIsExternalConnection(ctx, true)
-	onClose = registerInterrupt(chain, conn, onClose)
+	if !interrupt.IsResourceDownloadFromContext(ctx) {
+		onClose = registerInterrupt(chain, conn, onClose)
+	}
 	outbound := chain[len(chain)-1]
 	if outboundHandler, isHandler := outbound.(adapter.PacketConnectionHandler); isHandler {
 		outboundHandler.NewPacketConnection(ctx, conn, metadata, onClose)
@@ -331,6 +368,27 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		r.connection.NewPacketConnection(ctx, outbound, conn, metadata, onClose)
 	}
 	return nil
+}
+
+func (r *Router) wrapQUICSniffIdleCache(metadata adapter.InboundContext, onClose N.CloseHandlerFunc) N.CloseHandlerFunc {
+	if metadata.Protocol != C.ProtocolQUIC || metadata.SniffHost == "" {
+		return onClose
+	}
+	source := metadata.Source
+	destination := metadata.SniffDestination
+	if !destination.IsValid() {
+		destination = metadata.Destination
+		if metadata.DestOverride && metadata.OriginDestination.IsValid() {
+			destination = metadata.OriginDestination
+		}
+	}
+	result := quicSniffResult{host: metadata.SniffHost, hasECHExtension: metadata.SniffHasECHExtension}
+	return func(err error) {
+		r.refreshQUICSniff(source, destination, result)
+		if onClose != nil {
+			onClose(err)
+		}
+	}
 }
 
 func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) adapter.PreMatchResult {
@@ -343,6 +401,9 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) a
 		return continueResult
 	}
 	for currentRuleIndex, currentRule := range r.rules {
+		if currentRule.Disabled() {
+			continue
+		}
 		metadata.ResetRuleCache()
 		if !currentRule.Match(&metadata) {
 			continue
@@ -383,18 +444,26 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) a
 				}
 				continue
 			}
-			if metadata.Domain != "" && metadata.Client != "" {
-				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.Domain, ", client: ", metadata.Client)
-			} else if metadata.Domain != "" {
-				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.Domain)
+			r.processQUICSniff(ctx, &metadata)
+			if metadata.SniffHost != "" && metadata.Client != "" {
+				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost, ", client: ", metadata.Client)
+			} else if metadata.SniffHost != "" {
+				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost)
 			} else if metadata.Client != "" {
 				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", client: ", metadata.Client)
 			} else {
 				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol)
 			}
+		case *R.RuleActionSniffOverrideDestination:
+			if metadata.SniffHost != "" {
+				r.actionSniffOverrideDestination(ctx, &metadata, nil, nil, true)
+			}
 		case *R.RuleActionRouteOptions:
 			applyRouteOptionsOverride(&metadata, action)
 		case *R.RuleActionRoute:
+			if isPassOutbound(r.outbound, action.Outbound) {
+				continue
+			}
 			applyRouteOptionsOverride(&metadata, &action.RuleActionRouteOptions)
 			return r.preMatchFlow(ctx, &metadata, packetDestination, currentRule, action.Outbound)
 		case *R.RuleActionBypass:
@@ -473,19 +542,15 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 			return continueResult
 		}
 	}
-	chain, err := resolveOutbound(outbound, metadata.Network)
-	if err != nil {
+	chain, flowAction := r.selectPreMatchOutbound(metadata, outbound, 0)
+	if len(chain) == 0 {
 		return continueResult
 	}
 	outbound = chain[len(chain)-1]
-	flowOutbound, isFlowOutbound := outbound.(adapter.FlowOutbound)
-	if !isFlowOutbound {
-		return continueResult
-	}
-	flowAction := flowOutbound.PreMatchFlow(metadata.Network, metadata.Destination.Addr)
 	if flowAction != adapter.PreMatchFlow {
 		return adapter.PreMatchResult{Action: flowAction, Outbound: outbound}
 	}
+	flowOutbound := outbound.(adapter.FlowOutbound)
 	result := adapter.PreMatchResult{Action: adapter.PreMatchFlow, Outbound: outbound}
 	if metadata.Network == N.NetworkUDP {
 		if metadata.UDPTimeout > 0 {
@@ -501,8 +566,22 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 		}
 	}
 	if metadata.Destination.IsDomain() {
-		if !metadata.FakeIP {
+		if !metadata.FakeIP && !metadata.DestOverride {
 			return continueResult
+		}
+		resolvedByOutbound := false
+		if len(metadata.DestinationAddresses) == 0 {
+			flowResolver, isFlowResolver := outbound.(adapter.FlowOutboundDomainResolver)
+			if isFlowResolver {
+				resolvedByOutbound = true
+				destinationAddresses, resolveErr := r.dns.Lookup(adapter.WithContext(ctx, metadata), metadata.Destination.Fqdn, flowResolver.FlowDomainResolveOptions())
+				if resolveErr != nil {
+					r.logger.WarnContext(ctx, "pre-match: resolve domain destination ", metadata.Destination.Fqdn, " via outbound/", outbound.Type(), "[", outbound.Tag(), "]: ", resolveErr)
+					return adapter.PreMatchResult{Action: adapter.PreMatchReject}
+				}
+				metadata.DestinationAddresses = destinationAddresses
+				r.logger.DebugContext(ctx, "pre-match: resolved domain destination ", metadata.Destination.Fqdn, " to [", strings.Join(F.MapToString(destinationAddresses), " "), "] via outbound/", outbound.Type(), "[", outbound.Tag(), "]")
+			}
 		}
 		var newDestination netip.Addr
 		for _, address := range metadata.DestinationAddresses {
@@ -513,9 +592,13 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 		}
 		if !newDestination.IsValid() {
 			if len(metadata.DestinationAddresses) == 0 {
-				r.logger.WarnContext(ctx, "pre-match: reject ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to fake destination ", metadata.Destination.Fqdn, ": a resolve action is required before routing to outbound/", outbound.Type(), "[", outbound.Tag(), "]")
+				if resolvedByOutbound {
+					r.logger.DebugContext(ctx, "pre-match: reject ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to domain destination ", metadata.Destination.Fqdn, ": no resolved addresses")
+				} else {
+					r.logger.WarnContext(ctx, "pre-match: reject ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to domain destination ", metadata.Destination.Fqdn, ": a resolve action is required before routing to outbound/", outbound.Type(), "[", outbound.Tag(), "]")
+				}
 			} else {
-				r.logger.DebugContext(ctx, "pre-match: reject ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to fake destination ", metadata.Destination.Fqdn, ": no resolved address for this address family")
+				r.logger.DebugContext(ctx, "pre-match: reject ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to domain destination ", metadata.Destination.Fqdn, ": no resolved address for this address family")
 			}
 			return adapter.PreMatchResult{Action: adapter.PreMatchReject}
 		}
@@ -531,11 +614,14 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 	metadataCopy := *metadata
 	result.NewTracker = func() tun.FlowTracker {
 		r.logger.InfoContext(ctx, "pre-match: forward ", metadataCopy.Network, " connection from ", metadataCopy.Source, " to ", metadataCopy.Destination, " via outbound/", outbound.Type(), "[", outbound.Tag(), "]")
-		flowTrackers := make([]tun.FlowTracker, 0, len(r.trackers)+2)
+		flowTrackers := make([]tun.FlowTracker, 0, len(r.trackers)+3)
 		flowTrackers = append(flowTrackers, adapter.NewFlowLogger(ctx, r.logger))
 		flowInterrupter := newFlowInterrupter(chain)
 		if flowInterrupter != nil {
 			flowTrackers = append(flowTrackers, flowInterrupter)
+		}
+		if onClose := r.wrapQUICSniffIdleCache(metadataCopy, nil); onClose != nil {
+			flowTrackers = append(flowTrackers, &flowCloseCallback{onClose: N.OnceClose(onClose)})
 		}
 		for _, tracker := range r.trackers {
 			flowTracker := tracker.RoutedFlow(ctx, metadataCopy, matchedRule, outbound)
@@ -549,6 +635,49 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 		return &multiFlowTracker{trackers: flowTrackers}
 	}
 	return result
+}
+
+func (r *Router) selectPreMatchOutbound(metadata *adapter.InboundContext, outbound adapter.Outbound, depth int) ([]adapter.Outbound, adapter.PreMatchAction) {
+	if outbound == nil || depth > 8 {
+		return nil, adapter.PreMatchContinue
+	}
+	if preMatchGroup, isPreMatchGroup := outbound.(adapter.PreMatchOutboundGroup); isPreMatchGroup {
+		var selectedChain []adapter.Outbound
+		selected, action := preMatchGroup.SelectPreMatchOutbound(metadata, func(selectedOutbound adapter.Outbound) (adapter.Outbound, adapter.PreMatchAction) {
+			chain, action := r.selectPreMatchOutbound(metadata, selectedOutbound, depth+1)
+			if len(chain) == 0 {
+				return nil, action
+			}
+			selectedChain = chain
+			return chain[len(chain)-1], action
+		})
+		if selected == nil || len(selectedChain) == 0 {
+			return nil, adapter.PreMatchContinue
+		}
+		return append([]adapter.Outbound{outbound}, selectedChain...), action
+	}
+	if group, isGroup := outbound.(adapter.OutboundGroup); isGroup {
+		chain, action := r.selectPreMatchOutbound(metadata, group.Selected(metadata.Network), depth+1)
+		if len(chain) == 0 {
+			return nil, action
+		}
+		return append([]adapter.Outbound{outbound}, chain...), action
+	}
+	if !common.Contains(outbound.Network(), metadata.Network) {
+		return nil, adapter.PreMatchContinue
+	}
+	flowOutbound, isFlowOutbound := outbound.(adapter.FlowOutbound)
+	if !isFlowOutbound {
+		return nil, adapter.PreMatchContinue
+	}
+	flowAction := flowOutbound.PreMatchFlow(metadata.Network, metadata.Destination.Addr)
+	if flowAction == adapter.PreMatchContinue {
+		return nil, adapter.PreMatchContinue
+	}
+	if flowAction == adapter.PreMatchFlow && metadata.Destination.IsDomain() && !metadata.FakeIP && !metadata.DestOverride {
+		return nil, adapter.PreMatchContinue
+	}
+	return []adapter.Outbound{outbound}, flowAction
 }
 
 func (r *Router) prepareMatchMetadata(ctx context.Context, metadata *adapter.InboundContext) error {
@@ -582,16 +711,17 @@ func (r *Router) prepareMatchMetadata(ctx context.Context, metadata *adapter.Inb
 				Port: metadata.Destination.Port,
 			}
 			metadata.FakeIP = true
-			metadata.ECHPublicName = r.dns.LookupECHPublicName(domain)
 			r.logger.DebugContext(ctx, "found fakeip domain: ", domain)
 		}
 	} else if metadata.Domain == "" {
 		domain, loaded := r.dns.LookupReverseMapping(metadata.Destination.Addr)
 		if loaded {
 			metadata.Domain = domain
-			metadata.ECHPublicName = r.dns.LookupECHPublicName(domain)
 			r.logger.DebugContext(ctx, "found reverse mapped domain: ", metadata.Domain)
 		}
+	}
+	if domain := cmp.Or(metadata.Destination.Fqdn, metadata.Domain); domain != "" && r.dns != nil {
+		metadata.ECHPublicName = r.dns.LookupECHPublicName(domain)
 	}
 	if metadata.Destination.IsIPv4() {
 		metadata.IPVersion = 4
@@ -615,6 +745,9 @@ func (r *Router) matchRule(
 
 match:
 	for currentRuleIndex, currentRule := range r.rules {
+		if currentRule.Disabled() {
+			continue
+		}
 		metadata.ResetRuleCache()
 		if !currentRule.Match(metadata) {
 			continue
@@ -628,6 +761,9 @@ match:
 		var routeOptions *R.RuleActionRouteOptions
 		switch action := currentRule.Action().(type) {
 		case *R.RuleActionRoute:
+			if isPassOutbound(r.outbound, action.Outbound) {
+				continue
+			}
 			routeOptions = &action.RuleActionRouteOptions
 		case *R.RuleActionRouteOptions:
 			routeOptions = action
@@ -683,6 +819,10 @@ match:
 			if newErr != nil {
 				fatalErr = newErr
 				return
+			}
+		case *R.RuleActionSniffOverrideDestination:
+			if metadata.SniffHost != "" {
+				r.actionSniffOverrideDestination(ctx, metadata, inputConn, inputPacketConn, false)
 			}
 		case *R.RuleActionResolve:
 			fatalErr = r.actionResolve(ctx, metadata, action)
@@ -755,10 +895,10 @@ func (r *Router) actionSniff(
 		metadata.SnifferNames = action.SnifferNames
 		metadata.SniffError = err
 		if err == nil {
-			if metadata.Domain != "" && metadata.Client != "" {
-				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol, ", domain: ", metadata.Domain, ", client: ", metadata.Client)
-			} else if metadata.Domain != "" {
-				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol, ", domain: ", metadata.Domain)
+			if metadata.SniffHost != "" && metadata.Client != "" {
+				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost, ", client: ", metadata.Client)
+			} else if metadata.SniffHost != "" {
+				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost)
 			} else {
 				r.logger.DebugContext(ctx, "sniffed protocol: ", metadata.Protocol)
 			}
@@ -871,10 +1011,11 @@ func (r *Router) actionSniff(
 		}
 	finally:
 		if err == nil {
-			if metadata.Domain != "" && metadata.Client != "" {
-				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.Domain, ", client: ", metadata.Client)
-			} else if metadata.Domain != "" {
-				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.Domain)
+			r.processQUICSniff(ctx, metadata)
+			if metadata.SniffHost != "" && metadata.Client != "" {
+				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost, ", client: ", metadata.Client)
+			} else if metadata.SniffHost != "" {
+				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", domain: ", metadata.SniffHost)
 			} else if metadata.Client != "" {
 				r.logger.DebugContext(ctx, "sniffed packet protocol: ", metadata.Protocol, ", client: ", metadata.Client)
 			} else {
@@ -883,6 +1024,28 @@ func (r *Router) actionSniff(
 		}
 	}
 	return
+}
+
+func (r *Router) actionSniffOverrideDestination(ctx context.Context, metadata *adapter.InboundContext, inputConn net.Conn, inputPacketConn N.PacketConn, preMatch bool) {
+	if inputConn != nil {
+		if !metadata.Destination.IsDomain() && M.IsDomainName(metadata.SniffHost) {
+			metadata.Destination = M.Socksaddr{
+				Fqdn: metadata.SniffHost,
+				Port: metadata.Destination.Port,
+			}
+			r.logger.DebugContext(ctx, "connection destination is overridden as ", metadata.SniffHost, ":", metadata.Destination.Port)
+		}
+	} else if inputPacketConn != nil || preMatch {
+		if !metadata.Destination.IsDomain() && M.IsDomainName(metadata.SniffHost) {
+			metadata.OriginDestination = metadata.Destination
+			metadata.Destination = M.Socksaddr{
+				Fqdn: metadata.SniffHost,
+				Port: metadata.Destination.Port,
+			}
+			metadata.DestOverride = true
+			r.logger.DebugContext(ctx, "packet connection destination is overridden as ", metadata.SniffHost, ":", metadata.Destination.Port)
+		}
+	}
 }
 
 func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundContext, action *R.RuleActionResolve) error {
@@ -907,8 +1070,44 @@ func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundCon
 		if err != nil {
 			return err
 		}
-		metadata.DestinationAddresses = addresses
-		r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
+		if action.MatchOnly {
+			metadata.CacheIPs = addresses
+			r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.CacheIPs), " "), "] for match only")
+		} else {
+			metadata.DestinationAddresses = addresses
+			r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
+		}
+		metadata.IPVersion = 0
+		if len(addresses) > 0 {
+			if isAllIPv4(addresses) {
+				metadata.IPVersion = 4
+			} else if isAllIPv6(addresses) {
+				metadata.IPVersion = 6
+			}
+		}
 	}
 	return nil
+}
+
+func isAllIPv4(addresses []netip.Addr) bool {
+	for _, addr := range addresses {
+		if !addr.Is4() {
+			return false
+		}
+	}
+	return true
+}
+
+func isAllIPv6(addresses []netip.Addr) bool {
+	for _, addr := range addresses {
+		if !addr.Is6() {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Router) Rule(uuid string) (adapter.Rule, bool) {
+	rule, exists := r.ruleByUUID[uuid]
+	return rule, exists
 }

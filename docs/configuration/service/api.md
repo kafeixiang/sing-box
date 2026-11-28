@@ -14,6 +14,19 @@ Android (via the Remote Control feature), or the
 
 The server also accepts [gRPC-Web](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) requests.
 
+The bundled `sing-box api` client can query this service. For a running eBPF
+inbound, `sing-box api ebpf` provides runtime diagnostics; this is separate
+from the kernel capability probe provided by `sing-box tools ebpf status`.
+Runtime results include attachments, recovery state, UDP NAT, active programs,
+map occupancy, and data-plane failure counters. The default query returns the
+lightweight runtime state. Add `--deep` when program and map enumeration is
+needed; this is an on-demand inspection of visible sing-ebpf-owned resources,
+not a periodic health check.
+
+When [experimental observability](/configuration/experimental/observability/) is enabled,
+the dedicated `/observability/v1` HTTP API is also mounted on this listener and uses the
+same `secret` and TLS configuration.
+
 ### Structure
 
 ```json
@@ -25,6 +38,10 @@ The server also accepts [gRPC-Web](https://github.com/grpc/grpc/blob/master/doc/
   "secret": "",
   "access_control_allow_origin": [],
   "access_control_allow_private_network": false,
+  "dns": {
+    "enabled": false,
+    "path": "/dns-query"
+  },
   "dashboard": {
     "enabled": true,
     "path": "",
@@ -57,6 +74,23 @@ CORS allowed origins, `*` will be used if empty.
 #### access_control_allow_private_network
 
 Allow access from private network.
+
+#### dns
+
+Serve [DNS over HTTP(S)](/configuration/service/doh/) on the API listener.
+Queries use the internal DNS router and authenticate with `Authorization: Bearer <secret>`.
+If `secret` is empty, queries are anonymous.
+
+DoH shares the API listener’s TLS configuration.
+
+##### enabled
+
+Enable DoH. Disabled by default.
+
+##### path
+
+The DoH URL path. Defaults to `/dns-query`. Use a canonical absolute path that
+does not conflict with existing API routes or mounted subtrees.
 
 #### dashboard
 

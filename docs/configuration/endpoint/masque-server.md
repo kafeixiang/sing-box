@@ -14,6 +14,7 @@
   ... // Listen Fields
 
   "version": [],
+  // "h3_congestion_control": "bbr",
   "users": [
     {
       "username": "",
@@ -22,9 +23,13 @@
   ],
   "tls": {},
   "path": "",
+  "warp": false,
   "address": [],
   "advertise_routes": [],
+  // "tcp_congestion_control": "bbr",
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1280,
 
@@ -59,6 +64,22 @@ HTTP users, verified by the `Authorization` header.
 
 No authentication required if empty.
 
+### h3_congestion_control
+
+Selects the local sender congestion controller for HTTP/3 connections. Applies only to HTTP/3.
+
+Available values: `new_reno`, `cubic`, `bbr`, `none`.
+
+Omitting the field preserves the existing defaults: NewReno on the client and BBR on the server. BBR uses the Standard profile; profile and bandwidth parameters are not exposed. The setting affects only local sending, so the two peers may select different algorithms.
+
+When configured, `version` must include `3`. The default version list includes `3`. Builds without QUIC support reject this setting.
+
+This field does not change version fallback. Client fallback remains controlled by `disable_version_fallback`; the setting has no effect after fallback to HTTP/1 or HTTP/2.
+
+`none` bypasses the outer congestion window and pacing only for QUIC DATAGRAM packets carrying IP traffic. Control streams, the handshake, and reliable capsules retain normal congestion control. Capsule fallback remains available when DATAGRAM is unsupported. Exempt packets retain ACK/loss tracking, path MTU and resource limits, and use Not-ECT.
+
+Before using `none`, ensure tunneled traffic has appropriate congestion control or that the deployment provides suitable traffic management. UDP or KCP alone does not establish this. Lower latency is not guaranteed. Configure both peers to exempt both sending directions.
+
 ### tls
 
 TLS configuration, see [TLS](/configuration/shared/tls/#inbound).
@@ -67,9 +88,23 @@ IP proxying must be operated over TLS or QUIC. Leave it disabled only when the s
 
 ### path
 
-URI template path of the IP proxying resource, may contain the `target` and `ipproto` variables.
+Path and query of the [RFC 6570](https://www.rfc-editor.org/rfc/rfc6570) URI template of the IP proxying resource.
+
+The template must satisfy the same requirements as the client `path`, see [RFC 9484 Section 3](https://www.rfc-editor.org/rfc/rfc9484#section-3).
+
+Requests are matched against the expansions of the template. The `target` and `ipproto` variables are percent-decoded and validated as described in [RFC 9484 Section 4.6](https://www.rfc-editor.org/rfc/rfc9484#section-4.6); an undefined variable is treated as the wildcard `*`, and an invalid value is rejected with `400 Bad Request`. Other variables are ignored.
 
 `/.well-known/masque/ip/{target}/{ipproto}/` is used by default.
+
+With `warp` enabled, `/` is used by default.
+
+### warp
+
+Accept Cloudflare WARP's modified CONNECT-IP.
+
+The server accepts `cf-connect-ip`. It does not assign addresses and does not send address or route capsules. A client's address is the source address of the IP packets it sends, and must fall inside `address`.
+
+HTTP/2 clients use `CONNECT` with `cf-connect-proto: cf-connect-ip`. An empty request path is treated as `/`. DATAGRAM capsules on HTTP/1 and HTTP/2 do not contain a context identifier. HTTP/3 uses QUIC datagrams with context identifier 0.
 
 ### address
 
@@ -77,7 +112,7 @@ URI template path of the IP proxying resource, may contain the `target` and `ipp
 
 List of IP prefixes of the tunnel network, at most one for each IP version.
 
-The address of the prefix is used by the server itself, other addresses in the prefix are assigned to clients.
+The address of the prefix is used by the server itself. Without `warp`, other addresses in the prefix are assigned to clients. With `warp`, clients choose their own addresses inside the prefix.
 
 ### advertise_routes
 
@@ -87,6 +122,20 @@ Traffic from clients to other destinations is rejected.
 
 All addresses are advertised by default.
 
+### tcp_congestion_control
+
+Selects the congestion controller for the local sender in this endpoint's internal Go TCP stack.
+
+Available values: `reno`, `cubic`, `bbr`. Omitting the field preserves the default, CUBIC. Empty values and `none` are not supported.
+
+Only affects TCP connections terminated or initiated by this endpoint's internal Go TCP stack. It does not affect kernel TCP, TCP forwarded at L3, UDP, or inner QUIC. Peers may select different algorithms; for example, configure this field on the server to control TCP download data sent by its internal stack to the client.
+
+Allowed with either `system: false` or `system: true`, but only applies to connections handled by the internal Go TCP stack. Enabling the system interface does not make this setting affect kernel TCP.
+
+Applies to HTTP/1, HTTP/2, and HTTP/3, including after version fallback. Does not require a build with QUIC support. This field is independent of `h3_congestion_control`, which controls outer HTTP/3 congestion, and can be combined with its `none` value.
+
+Changing algorithms does not guarantee higher throughput; test on the actual network path.
+
 ### system
 
 Use system interface.
@@ -94,6 +143,30 @@ Use system interface.
 Requires privilege and cannot conflict with existing system interfaces.
 
 If disabled, sing-box uses the internal network stack.
+
+### gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Attempt to enable generic segmentation offload for the system interface.
+
+Enabled by default when `system` is `true`. Set to `false` to disable.
+
+This option has no effect when `system` is `false`.
+
+### inner_domain_resolver
+
+Set the DNS resolver used for destination domain names when this endpoint is selected as an outbound. Applies to TCP and UDP.
+
+It is also used to resolve unresolved domain destinations when this endpoint is selected for L3 forwarding.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When unset, existing DNS routing rules and the default DNS apply. IP destinations do not require domain resolution.
+
+This resolver also resolves domain names in the CONNECT-IP request path's `target`. The resolved addresses remain subject to `advertise_routes`.
 
 ### name
 

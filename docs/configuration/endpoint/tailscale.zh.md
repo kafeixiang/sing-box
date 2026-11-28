@@ -43,13 +43,16 @@ icon: material/new-box
   "listen_port": 0,
   "relay_server_port": 0,
   "relay_server_static_endpoints": [],
+  // "tcp_congestion_control": "bbr",
   "system_interface": false,
   "system_interface_name": "",
+  "system_interface_gso": false,
   "system_interface_mtu": 0,
   "udp_timeout": "5m",
   "ssh_server": false,
   "taildrop_directory": "",
   "on_demand": false,
+  "inner_domain_resolver": "", // 或 {}
 
   ... // 拨号字段
 }
@@ -149,6 +152,18 @@ icon: material/new-box
 
 为中继服务器通告的静态端点。
 
+#### tcp_congestion_control
+
+选择此端点内部 Go TCP 栈发送方向的拥塞控制算法。
+
+可选值：`reno`、`cubic`、`bbr`。省略时保留默认值 CUBIC；不支持空值或 `none`。
+
+仅影响由此端点内部 Go TCP 栈终结或发起的 TCP 连接，不影响系统内核 TCP、纯 L3 转发的 TCP、UDP 或内层 QUIC。两端可以选择不同的算法。配置仅影响此端点发送的数据；例如，此端点作为出口节点或子网路由器时，控制其内部栈向 tailnet 对端发送的 TCP 数据。
+
+`system_interface` 为 `false` 或 `true` 时均可配置，但只对经过内部 Go TCP 栈的连接生效。启用系统接口不会使此设置影响内核 TCP。
+
+切换算法不保证提高吞吐量，应结合实际链路测试。
+
 #### system_interface
 
 !!! question "自 sing-box 1.13.0 起"
@@ -160,6 +175,18 @@ icon: material/new-box
 !!! question "自 sing-box 1.13.0 起"
 
 自定义 TUN 接口名。默认使用 `tailscale`（macOS 上为 `utun`）。
+
+#### system_interface_gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试启用通用分段卸载。
+
+当 `system_interface` 为 true 时，默认启用。
+
+此选项控制系统接口。连接对端所用 UDP socket 的 GSO 参阅 [拨号字段](/zh/configuration/shared/dial/#udp_gso) 中的 `udp_gso`。
 
 #### system_interface_mtu
 
@@ -233,11 +260,21 @@ UDP NAT 过期时间。
 
 允许该 endpoint 在需要时断开连接。
 
+#### inner_domain_resolver
+
+设置用于解析通过 Tailscale 隧道的连接的域名解析器。
+
+当此端点被选中用于 L3 转发时，它也用于解析尚未解析的域名目标。
+
+此选项与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 格式相同。
+
+未设置时使用默认 DNS。
+
 ### 拨号字段
 
 !!! note
 
-    Tailscale 端点中的拨号字段仅控制它如何连接到控制平面，与实际连接无关。
+    Tailscale 端点中的拨号字段仅控制它如何连接到控制平面，与实际连接无关；`udp_gso` 例外，它还控制 magicsock 和对等中继的 UDP socket。
 
 参阅 [拨号字段](/zh/configuration/shared/dial/) 了解详情。
 

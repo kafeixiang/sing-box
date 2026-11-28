@@ -4,23 +4,31 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
 	boxService "github.com/sagernet/sing-box/adapter/service"
+	"github.com/sagernet/sing-box/common/doh"
 	"github.com/sagernet/sing-box/common/listener"
 	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
+	"github.com/sagernet/sing-box/experimental/observability"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	N "github.com/sagernet/sing/common/network"
 	aTLS "github.com/sagernet/sing/common/tls"
+	"github.com/sagernet/sing/service"
 
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c" //nolint:staticcheck
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
+	reflectionalphapb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 )
+
+const observabilityRoutePrefix = "/observability/v1"
 
 func RegisterService(registry *boxService.Registry) {
 	boxService.Register[option.APIServiceOptions](registry, C.TypeAPI, NewService)
@@ -33,6 +41,8 @@ type Service struct {
 	listener  *listener.Listener
 	tlsConfig tls.ServerConfig
 	dashboard *dashboard
+	dohPath   string
+	doh       http.Handler
 }
 
 func NewService(ctx context.Context, logger log.ContextLogger, tag string, options option.APIServiceOptions) (adapter.Service, error) {
@@ -46,6 +56,26 @@ func NewService(ctx context.Context, logger log.ContextLogger, tag string, optio
 			Network: []string{N.NetworkTCP},
 			Listen:  options.ListenOptions,
 		}),
+	}
+	if options.DNS != nil && options.DNS.Enabled {
+		path, err := doh.ResolvePath(options.DNS.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, subtree := range []string{
+			strings.TrimSuffix(dashboardRoutePrefix, "/"),
+			observabilityRoutePrefix,
+			"/" + daemon.StartedService_ServiceDesc.ServiceName,
+			"/" + healthpb.Health_ServiceDesc.ServiceName,
+			"/" + reflectionpb.ServerReflection_ServiceDesc.ServiceName,
+			"/" + reflectionalphapb.ServerReflection_ServiceDesc.ServiceName,
+		} {
+			if err := doh.CheckPathConflict(path, subtree); err != nil {
+				return nil, err
+			}
+		}
+		s.dohPath = path
+		s.doh = authenticateHTTP(options.Secret, doh.NewHandler(service.FromContext[adapter.DNSRouter](ctx), path, tag, C.TypeAPI))
 	}
 	if options.TLS != nil {
 		tlsConfig, err := tls.NewServer(ctx, logger, common.PtrValueOrDefault(options.TLS))
@@ -75,6 +105,10 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		grpcServer.Stop()
 		return nil
 	})
+	var observabilityHandler http.Handler
+	if observabilityService := service.FromContext[observability.Service](ctx); observabilityService != nil {
+		observabilityHandler = authenticateHTTP(s.options.Secret, http.StripPrefix(observabilityRoutePrefix, observabilityService.Handler()))
+	}
 	if s.dashboard != nil {
 		err := s.dashboard.start(ctx)
 		if err != nil {
@@ -82,12 +116,16 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		}
 		scope.Add(s.dashboard.close)
 	}
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
 	httpServer := &http.Server{
-		//nolint:staticcheck
-		Handler: h2c.NewHandler(newHTTPHandler(s.logger, grpcServer, s.options, s.dashboard), new(http2.Server)),
+		Handler: newHTTPHandler(s.logger, grpcServer, s.options, s.dashboard, observabilityHandler, s.dohPath, s.doh),
 		BaseContext: func(net.Listener) context.Context {
 			return ctx
 		},
+		Protocols: protocols,
 	}
 	if s.tlsConfig != nil {
 		err := s.tlsConfig.Start()
@@ -118,4 +156,16 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		}
 	}()
 	return nil
+}
+
+func authenticateHTTP(secret string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if secret == "" || request.Header.Get("Authorization") == "Bearer "+secret {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte("{\"error\":{\"code\":\"unauthorized\",\"message\":\"unauthorized\"}}\n"))
+	})
 }

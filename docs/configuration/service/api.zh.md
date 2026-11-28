@@ -12,6 +12,16 @@ sing-box API 服务是用于观察与控制正在运行的 sing-box 实例的 gR
 
 服务器同时接受 [gRPC-Web](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) 请求。
 
+可使用内置的 `sing-box api` 客户端查询该服务。对于运行中的 eBPF 入站，可通过
+`sing-box api ebpf` 查看运行时诊断；该命令不同于用于探测内核能力的
+`sing-box tools ebpf status`。运行时结果包含 attachment、恢复状态、UDP NAT、
+活动 program、map 占用和数据面失败计数。默认请求只返回轻量级运行状态；需要枚举
+program 和 map 时添加 `--deep`。这只会按请求检查可见的 sing-ebpf 所有资源，不是
+周期性健康检查。
+
+启用[实验性可观测性](/zh/configuration/experimental/observability/)后，专用的
+`/observability/v1` HTTP API 也会挂载到该监听器，并复用相同的 `secret` 和 TLS 配置。
+
 ### 结构
 
 ```json
@@ -23,6 +33,10 @@ sing-box API 服务是用于观察与控制正在运行的 sing-box 实例的 gR
   "secret": "",
   "access_control_allow_origin": [],
   "access_control_allow_private_network": false,
+  "dns": {
+    "enabled": false,
+    "path": "/dns-query"
+  },
   "dashboard": {
     "enabled": true,
     "path": "",
@@ -55,6 +69,21 @@ API 密钥。
 #### access_control_allow_private_network
 
 允许从私有网络访问。
+
+#### dns
+
+启用后，在 API 监听地址上提供 [DNS over HTTP(S)](/zh/configuration/service/doh/)。
+请求通过内部 DNS 路由器处理，使用 `Authorization: Bearer <secret>` 认证。未设置 `secret` 时允许匿名查询。
+
+DoH 复用此 API 的 TLS 配置。
+
+##### enabled
+
+启用 DoH。默认关闭。
+
+##### path
+
+DoH 的 URL 路径。默认使用 `/dns-query`。必须是规范的绝对路径，且不能与现有 API 路由及其挂载的子树冲突。
 
 #### dashboard
 

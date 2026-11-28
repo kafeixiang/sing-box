@@ -46,11 +46,15 @@ type ClientOptions struct {
 	Username               string
 	Password               string
 	Path                   string
+	UDPPath                string
 	Headers                http.Header
 	Version                int
 	DisableVersionFallback bool
+	UDPFastOpen            bool
+	Warp                   bool
 	HTTP2Options           option.HTTP2Options
 	HTTP3Options           option.QUICOptions
+	H3CongestionControl    option.H3CongestionControl
 }
 
 type http3Client interface {
@@ -77,9 +81,12 @@ type Client struct {
 	authorization                   string
 	host                            string
 	path                            string
+	udpTemplate                     *UDPTemplate
 	headers                         http.Header
 	version                         int
 	disableVersionFallback          bool
+	udpFastOpen                     bool
+	warp                            bool
 	http2Transport                  *http2.Transport
 	http2Access                     sync.Mutex
 	http2Sessions                   []*http2Session
@@ -91,6 +98,14 @@ type Client struct {
 	http3Backoff                    atomic.Int64
 	http3ExtendedConnectUnsupported atomic.Bool
 	closeIdle                       atomic.Bool
+	handshakeTimeout                time.Duration
+}
+
+func (c *Client) effectiveHandshakeTimeout() time.Duration {
+	if c.handshakeTimeout > 0 {
+		return c.handshakeTimeout
+	}
+	return C.TCPTimeout
 }
 
 func NewClientWithTLS(ctx context.Context, logger logger.ContextLogger, outboundDialer N.Dialer, serverOptions option.ServerOptions, tlsOptions option.OutboundTLSOptions, domainResolver *option.DomainResolveOptions, options ClientOptions) (*Client, error) {
@@ -146,7 +161,14 @@ func NewClient(options ClientOptions) (*Client, error) {
 		headers:                options.Headers.Clone(),
 		version:                options.Version,
 		disableVersionFallback: options.DisableVersionFallback,
+		udpFastOpen:            options.UDPFastOpen,
+		warp:                   options.Warp,
 	}
+	udpTemplate, err := ParseUDPTemplate(options.UDPPath)
+	if err != nil {
+		return nil, E.Cause(err, "parse UDP path")
+	}
+	client.udpTemplate = udpTemplate
 	if client.headers != nil {
 		client.host = client.headers.Get("Host")
 		client.headers.Del("Host")
@@ -171,6 +193,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 			return nil, err
 		}
 		http2Transport.DisableCompression = true
+		initializeHTTP2Transport(http2Transport)
 		client.http2Transport = http2Transport
 	} else if client.version == 2 && options.DisableVersionFallback {
 		return nil, E.New("HTTP/2 requires TLS")
@@ -238,7 +261,10 @@ func (c *Client) DialContext(ctx context.Context, network string, destination M.
 		return nil, E.Extend(N.ErrUnknownNetwork, network)
 	}
 	if c.http3Available() {
-		conn, err := c.http3.DialContext(ctx, destination)
+		attemptCtx, cancel := c.http3AttemptContext(ctx)
+		conn, err := c.http3.DialContext(attemptCtx, destination)
+		err = http3AttemptError(ctx, attemptCtx, err)
+		cancel()
 		if err == nil {
 			c.clearHTTP3Broken()
 			return conn, nil
@@ -418,14 +444,54 @@ func (c *Client) ListenPacket(ctx context.Context, destination M.Socksaddr) (net
 	if err != nil {
 		return nil, err
 	}
-	return deadline.NewPacketConn(bufio.NewNetPacketConn(&boundPacketConn{PacketConn: packetConn, destination: destination.Unwrap()})), nil
+	netPacketConn := bufio.NewNetPacketConn(&boundPacketConn{PacketConn: packetConn, destination: destination.Unwrap()})
+	if deadline.NeedAdditionalReadDeadline(packetConn) {
+		return &deadlinePacketConn{
+			NetPacketConn: deadline.NewPacketConn(netPacketConn),
+		}, nil
+	}
+	return netPacketConn, nil
+}
+
+type deadlinePacketConn struct {
+	N.NetPacketConn
+}
+
+func (c *deadlinePacketConn) SetDeadline(t time.Time) error {
+	if err := c.SetWriteDeadline(t); err != nil {
+		return err
+	}
+	return c.SetReadDeadline(t)
+}
+
+func (c *deadlinePacketConn) ReaderReplaceable() bool {
+	if replaceable, ok := c.NetPacketConn.(N.ReaderWithUpstream); ok {
+		return replaceable.ReaderReplaceable()
+	}
+	return false
+}
+
+func (c *deadlinePacketConn) WriterReplaceable() bool {
+	if replaceable, ok := c.NetPacketConn.(N.WriterWithUpstream); ok {
+		return replaceable.WriterReplaceable()
+	}
+	return false
+}
+
+func (c *deadlinePacketConn) Upstream() any {
+	return c.NetPacketConn
 }
 
 func (c *Client) listenPacket(ctx context.Context, destination M.Socksaddr) (N.PacketConn, error) {
+	requestURL, err := c.udpTemplate.Expand(destination)
+	if err != nil {
+		return nil, E.Cause(err, "expand UDP path")
+	}
 	conn, stream, err := c.openTunnel(ctx, tunnelRequest{
 		protocol:    connectUDPProtocol,
-		url:         connectUDPURL(destination),
+		url:         requestURL,
 		destination: destination,
+		fastOpen:    c.udpFastOpen,
 	})
 	if err != nil {
 		return nil, err

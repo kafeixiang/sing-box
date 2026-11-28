@@ -15,7 +15,10 @@
   "type": "openconnect",
   "tag": "oc-client",
 
+  // "tcp_congestion_control": "bbr",
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
 
   ... // UDP NAT 字段
@@ -123,6 +126,18 @@
 
 ## 字段
 
+### tcp_congestion_control
+
+选择此端点内部 Go TCP 栈发送方向的拥塞控制算法。
+
+可选值：`reno`、`cubic`、`bbr`。省略时保留默认值 CUBIC；不支持空值或 `none`。
+
+仅影响由此端点内部 Go TCP 栈终结或发起的 TCP 连接，不影响系统内核 TCP、纯 L3 转发的 TCP、UDP 或内层 QUIC。配置仅影响此端点发送的数据，例如经隧道发起的 TCP 连接中的上传数据；经隧道接收的数据由远端 TCP 发送方控制。
+
+`system` 为 `false` 或 `true` 时均可配置，但只对经过内部 Go TCP 栈的连接生效。启用系统接口不会使此设置影响内核 TCP。
+
+切换算法不保证提高吞吐量，应结合实际链路测试。
+
 ### system
 
 使用系统接口。
@@ -130,6 +145,30 @@
 需要权限，且不能与现有系统接口冲突。
 
 禁用时，sing-box 使用内部网络栈。
+
+### gso
+
+!!! quote ""
+
+    仅支持 Linux。
+
+尝试为系统接口启用通用分段卸载。
+
+当 `system` 为 `true` 时，默认启用。设为 `false` 可禁用。
+
+当 `system` 为 `false` 时，此选项不生效。
+
+### inner_domain_resolver
+
+指定将此 endpoint 用作出站时，解析目标域名所使用的 DNS 解析器。适用于 TCP 和 UDP。
+
+当此端点被选中用于 L3 转发时，也使用此解析器解析尚未解析的目标域名。
+
+此选项使用与 [domain_resolver](/zh/configuration/shared/dial/#domain_resolver) 相同的格式。
+
+未设置时，使用现有 DNS 路由规则及默认 DNS。目标为 IP 地址时不进行域名解析。
+
+此选项不影响 VPN 服务器地址的解析；服务器地址仍使用拨号字段中的 `domain_resolver`。
 
 ### name
 

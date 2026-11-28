@@ -87,6 +87,7 @@ icon: material/new-box
         "domain_regex": [
           "^stun\\..+"
         ],
+        "domain_is_ech": true,
         "geosite": [
           "cn"
         ],
@@ -142,7 +143,9 @@ icon: material/new-box
         "user_id": [
           1000
         ],
-        "clash_mode": "direct",
+        "clash_mode": [
+          "direct"
+        ],
         "network_type": [
           "wifi"
         ],
@@ -281,6 +284,14 @@ icon: material/new-box
 
 匹配域名正则表达式。
 
+#### domain_is_ech
+
+设为 true 时，在嗅探到 TLS 或 QUIC ClientHello 后匹配。ClientHello 必须带有 ECH 扩展，其外层 SNI 必须与通过 DNS 学到的原始目标 ECH 公开名称相同。
+
+将使用此条件的规则放在 sniff 动作之后。启用 DNS 反向映射或 FakeIP 时，公开名称从 DNS HTTPS 记录中学习。外层 SNI 继续作为嗅探域名使用。
+
+此条件始终使用嗅探到的 SNI。`domain_match_strategy` 用于选择其他域名条件匹配的域名。
+
 #### geosite
 
 !!! failure "已在 sing-box 1.8.0 废弃"
@@ -403,7 +414,7 @@ icon: material/new-box
 
 !!! quote ""
 
-    仅在 Android 与 Apple 平台图形客户端中支持。
+    仅在 Android 与 Apple 平台图形客户端、安卓核心中支持。
 
 匹配网络类型。
 
@@ -478,11 +489,12 @@ icon: material/new-box
 
 匹配制定出站的首选路由。
 
-| 类型          | 匹配                             |
-|-------------|--------------------------------|
-| `tailscale` | 匹配 MagicDNS 域名和对端的 allowed IPs |
-| `wireguard` | 匹配对端的 allowed IPs              |
-| `bridge`    | 匹配除本机本地地址外的所有地址，仅在[预匹配](/zh/configuration/shared/pre-match/)中 |
+| 类型            | 匹配                             |
+|---------------|--------------------------------|
+| `tailscale`   | 匹配 MagicDNS 域名和对端的 allowed IPs |
+| `wireguard`   | 匹配对端的 allowed IPs              |
+| `easyconnect` | 匹配 VPN 服务器发布的资源列表前缀和域名     |
+| `bridge`      | 匹配除本机本地地址外的所有地址，仅在[预匹配](/zh/configuration/shared/pre-match/)中 |
 
 #### dns_server_address
 
@@ -498,6 +510,7 @@ icon: material/new-box
 | `tailscale`   | 匹配 tailnet 的 DNS 解析器              |
 | `openvpn`     | 匹配 VPN 服务器推送的 DNS 服务器             |
 | `openconnect` | 匹配 VPN 服务器推送的 DNS 服务器             |
+| `easyconnect` | 匹配 VPN 服务器推送的 DNS 服务器             |
 
 #### dns_search_domain
 
@@ -513,6 +526,7 @@ icon: material/new-box
 | `tailscale`   | 匹配 tailnet 的搜索域                |
 | `openvpn`     | 匹配 VPN 服务器推送的搜索域              |
 | `openconnect` | 匹配 VPN 服务器推送的搜索域              |
+| `easyconnect` | 匹配 VPN 服务器推送的搜索域              |
 
 #### source_mac_address
 

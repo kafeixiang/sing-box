@@ -29,7 +29,9 @@ const (
 	DNSTypeMDNS        = "mdns"
 	DNSTypeTailscale   = "tailscale"
 	DNSTypeOpenConnect = "openconnect"
+	DNSTypeEasyConnect = "easyconnect"
 	DNSTypeOpenVPN     = "openvpn"
+	DNSTypeGroup       = "group"
 )
 
 const (

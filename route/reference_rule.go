@@ -2,8 +2,10 @@ package route
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 
+	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 )
@@ -27,9 +29,13 @@ func (m staticMatch) invert() staticMatch {
 	}
 }
 
-func evaluateClashMode(clashMode string, mode string, invert bool, otherConditions bool) staticMatch {
+func evaluateClashMode(clashModes []string, mode string, invert bool, otherConditions bool) staticMatch {
+	clashModes = option.NormalizeClashModes(clashModes)
+	if len(clashModes) == 0 && !otherConditions {
+		return staticMatchAlways
+	}
 	match := staticMatchUnknown
-	if clashMode != "" && !strings.EqualFold(clashMode, mode) {
+	if len(clashModes) > 0 && !slices.ContainsFunc(clashModes, func(clashMode string) bool { return strings.EqualFold(clashMode, mode) }) {
 		match = staticMatchNever
 	} else if !otherConditions {
 		match = staticMatchAlways
@@ -70,7 +76,7 @@ func evaluateRule(rule option.Rule, mode string) staticMatch {
 	switch rule.Type {
 	case C.RuleTypeDefault:
 		conditions := rule.DefaultOptions.RawDefaultRule
-		conditions.ClashMode = ""
+		conditions.ClashMode = nil
 		conditions.Invert = false
 		return evaluateClashMode(rule.DefaultOptions.ClashMode, mode, rule.DefaultOptions.Invert, !reflect.DeepEqual(conditions, option.RawDefaultRule{}))
 	case C.RuleTypeLogical:
@@ -88,7 +94,7 @@ func evaluateDNSRule(rule option.DNSRule, mode string) staticMatch {
 	switch rule.Type {
 	case C.RuleTypeDefault:
 		conditions := rule.DefaultOptions.RawDefaultDNSRule
-		conditions.ClashMode = ""
+		conditions.ClashMode = nil
 		conditions.Invert = false
 		return evaluateClashMode(rule.DefaultOptions.ClashMode, mode, rule.DefaultOptions.Invert, !reflect.DeepEqual(conditions, option.RawDefaultDNSRule{}))
 	case C.RuleTypeLogical:
@@ -124,7 +130,7 @@ func collectDNSRulePreferredBy(rule option.DNSRule, outbounds *[]string) {
 	}
 }
 
-func collectRuleReferences(rules []option.Rule, mode string, outbounds *[]string, transports *[]string) (shadowed bool) {
+func collectRuleReferences(rules []option.Rule, mode string, manager adapter.OutboundManager, outbounds *[]string, transports *[]string) (shadowed bool) {
 	for _, rule := range rules {
 		match := evaluateRule(rule, mode)
 		if match == staticMatchNever {
@@ -143,7 +149,7 @@ func collectRuleReferences(rules []option.Rule, mode string, outbounds *[]string
 		switch action.Action {
 		case C.RuleActionTypeRoute:
 			*outbounds = append(*outbounds, action.RouteOptions.Outbound)
-			final = true
+			final = !isPassOutbound(manager, action.RouteOptions.Outbound)
 		case C.RuleActionTypeBypass:
 			if action.BypassOptions.Outbound != "" {
 				*outbounds = append(*outbounds, action.BypassOptions.Outbound)

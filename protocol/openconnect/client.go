@@ -37,7 +37,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*Endpoint)(nil)
-	_ adapter.FlowOutbound                = (*Endpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*Endpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*Endpoint)(nil)
 	_ adapter.OnDemandEndpoint            = (*Endpoint)(nil)
 	_ dialer.PacketDialerWithDestination  = (*Endpoint)(nil)
@@ -46,27 +46,28 @@ var (
 
 type Endpoint struct {
 	endpointBase
-	loopContext        context.Context
-	cancelLoop         context.CancelFunc
-	dnsRouter          adapter.DNSRouter
-	outboundManager    adapter.OutboundManager
-	detour             string
-	clientOptions      openconnect.ClientOptions
-	client             *openconnect.Client
-	deviceOptions      *device.Options
-	device             device.Device
-	onDemand           bool
-	server             string
-	flavor             string
-	stateAccess        sync.Mutex
-	state              atomic.Pointer[clientState]
-	dnsTransportAccess sync.Mutex
-	dnsTransport       *DNSTransport
-	deviceStarted      bool
-	statusAccess       sync.Mutex
-	statusUpdated      chan struct{}
-	terminalError      string
-	hotpCounter        atomic.Uint64
+	loopContext          context.Context
+	cancelLoop           context.CancelFunc
+	dnsRouter            adapter.DNSRouter
+	outboundManager      adapter.OutboundManager
+	detour               string
+	clientOptions        openconnect.ClientOptions
+	client               *openconnect.Client
+	deviceOptions        *device.Options
+	device               device.Device
+	onDemand             bool
+	server               string
+	flavor               string
+	stateAccess          sync.Mutex
+	state                atomic.Pointer[clientState]
+	dnsTransportAccess   sync.Mutex
+	dnsTransport         *DNSTransport
+	deviceStarted        bool
+	statusAccess         sync.Mutex
+	statusUpdated        chan struct{}
+	terminalError        string
+	hotpCounter          atomic.Uint64
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 type clientState struct {
@@ -80,6 +81,13 @@ type clientState struct {
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.OpenConnectEndpointOptions) (adapter.Endpoint, error) {
+	if err := options.TCPCongestionControl.Validate(); err != nil {
+		return nil, err
+	}
+	innerDNSQueryOptions, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+	if err != nil {
+		return nil, E.Cause(err, "inner domain resolver")
+	}
 	tcpKeepAliveEnabled := options.TCPKeepAliveEnabled || options.TCPKeepAlive != 0 || options.TCPKeepAliveInterval != 0
 	if tcpKeepAliveEnabled && options.DisableTCPKeepAlive {
 		return nil, E.New("tcp_keep_alive_enabled conflicts with disable_tcp_keep_alive")
@@ -125,6 +133,7 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		statusUpdated:   make(chan struct{}),
 		onDemand:        options.OnDemand,
 	}
+	openConnectEndpoint.innerDNSQueryOptions = innerDNSQueryOptions
 	openConnectEndpoint.state.Store(new(clientState))
 	success := false
 	defer func() {
@@ -167,22 +176,29 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		udpTimeout = time.Duration(options.UDPTimeout)
 	}
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
+	gso := options.System
+	if options.GSO != nil {
+		gso = *options.GSO
+	}
+
 	openConnectEndpoint.deviceOptions = &device.Options{
-		Context:             ctx,
-		Logger:              logger,
-		System:              options.System,
-		Handler:             openConnectEndpoint,
-		UDPTimeout:          udpTimeout,
-		ICMPTimeout:         C.ICMPTimeout,
-		UDPMapping:          tun.NATMapping(options.UDPMapping),
-		UDPFiltering:        tun.NATFiltering(options.UDPFiltering),
-		UDPNATMax:           options.UDPNATMax,
-		InterfaceFinder:     networkManager.InterfaceFinder(),
-		Name:                options.Name,
-		NamePrefix:          "oc",
-		MTU:                 openconnecttransport.DefaultMTU,
-		PacketFrontHeadroom: openconnect.PacketHeadroom,
-		PacketRearHeadroom:  openconnect.PacketRearHeadroom,
+		TCPCongestionControl: string(options.TCPCongestionControl),
+		Context:              ctx,
+		Logger:               logger,
+		System:               options.System,
+		GSO:                  gso,
+		Handler:              openConnectEndpoint,
+		UDPTimeout:           udpTimeout,
+		ICMPTimeout:          C.ICMPTimeout,
+		UDPMapping:           tun.NATMapping(options.UDPMapping),
+		UDPFiltering:         tun.NATFiltering(options.UDPFiltering),
+		UDPNATMax:            options.UDPNATMax,
+		InterfaceFinder:      networkManager.InterfaceFinder(),
+		Name:                 options.Name,
+		NamePrefix:           "oc",
+		MTU:                  openconnecttransport.DefaultMTU,
+		PacketFrontHeadroom:  openconnect.PacketHeadroom,
+		PacketRearHeadroom:   openconnect.PacketRearHeadroom,
 		Configuration: device.Configuration{
 			MTU: openconnecttransport.DefaultMTU,
 		},
@@ -572,6 +588,10 @@ func (e *Endpoint) PreMatchFlow(network string, destination netip.Addr) adapter.
 	return adapter.PreMatchFlow
 }
 
+func (e *Endpoint) FlowDomainResolveOptions() adapter.DNSQueryOptions {
+	return e.innerDNSQueryOptions
+}
+
 func (e *Endpoint) PortAddresses() (netip.Addr, netip.Addr) {
 	return e.device.PortAddresses()
 }
@@ -654,7 +674,7 @@ func (e *Endpoint) DialContext(ctx context.Context, network string, destination 
 		return nil, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, e.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -673,7 +693,7 @@ func (e *Endpoint) ListenPacketWithDestination(ctx context.Context, destination 
 		return nil, netip.Addr{}, readyErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, e.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

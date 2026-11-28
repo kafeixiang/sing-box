@@ -8,12 +8,19 @@ import (
 )
 
 type OpenVPNEndpointOptions struct {
-	System       bool           `json:"system,omitempty"`
-	Name         string         `json:"name,omitempty"`
-	MTU          uint32         `json:"mtu,omitempty"`
-	UDPMapping   UDPNATBehavior `json:"udp_mapping,omitempty"`
-	UDPFiltering UDPNATBehavior `json:"udp_filtering,omitempty"`
-	UDPNATMax    uint32         `json:"udp_nat_max,omitempty"`
+	TCPCongestionControl TCPCongestionControl  `json:"tcp_congestion_control,omitempty" enum:"reno,cubic,bbr"`
+	InnerDomainResolver  *DomainResolveOptions `json:"inner_domain_resolver,omitempty"`
+	System               bool                  `json:"system,omitempty"`
+	GSO                  *bool                 `json:"gso,omitempty"`
+	Name                 string                `json:"name,omitempty"`
+	MTU                  uint32                `json:"mtu,omitempty"`
+	UDPMapping           UDPNATBehavior        `json:"udp_mapping,omitempty"`
+	UDPFiltering         UDPNATBehavior        `json:"udp_filtering,omitempty"`
+	UDPNATMax            uint32                `json:"udp_nat_max,omitempty"`
+}
+
+func (o *OpenVPNEndpointOptions) TakeInnerDomainResolverOptions() *DomainResolveOptions {
+	return o.InnerDomainResolver
 }
 
 type OpenVPNClientEndpointOptions struct {

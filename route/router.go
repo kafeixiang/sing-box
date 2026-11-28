@@ -6,11 +6,13 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/expiringmap"
 	"github.com/sagernet/sing-box/common/process"
 	"github.com/sagernet/sing-box/common/taskmonitor"
 	C "github.com/sagernet/sing-box/constant"
@@ -19,6 +21,7 @@ import (
 	R "github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/task"
 	"github.com/sagernet/sing/contrab/freelru"
 	"github.com/sagernet/sing/contrab/maphash"
@@ -33,12 +36,14 @@ type Router struct {
 	logger                       log.ContextLogger
 	inbound                      adapter.InboundManager
 	outbound                     adapter.OutboundManager
+	provider                     adapter.ProviderManager
 	dns                          adapter.DNSRouter
 	dnsTransport                 adapter.DNSTransportManager
 	connection                   adapter.ConnectionManager
 	network                      adapter.NetworkManager
 	httpClientManager            adapter.HTTPClientManager
 	rules                        []adapter.Rule
+	ruleByUUID                   map[string]adapter.Rule
 	needFindProcess              bool
 	ruleSetNeedFindProcess       atomic.Bool
 	ruleSetNeedFindProcessAccess sync.Mutex
@@ -54,31 +59,46 @@ type Router struct {
 	pauseManager                 pause.Manager
 	trackers                     []adapter.ConnectionTracker
 	platformInterface            adapter.PlatformInterface
+
+	processLookupMode      process.LookupMode
+	processCacheGeneration atomic.Uint64
+
+	quicSniffCache             *expiringmap.Map[quicSniffCacheKey, quicSniffResult]
+	defaultDomainMatchStrategy C.DomainMatchStrategy
+	reloadChan                 chan<- struct{}
 }
 
-func NewRouter(ctx context.Context, logFactory log.Factory, options option.RouteOptions, dnsOptions option.DNSOptions) *Router {
+func NewRouter(ctx context.Context, logFactory log.Factory, options option.RouteOptions, dnsOptions option.DNSOptions, reloadChan chan<- struct{}) *Router {
 	platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
 	return &Router{
 		ctx:               ctx,
 		logger:            logFactory.NewLogger("router"),
 		inbound:           service.FromContext[adapter.InboundManager](ctx),
 		outbound:          service.FromContext[adapter.OutboundManager](ctx),
+		provider:          service.FromContext[adapter.ProviderManager](ctx),
 		dns:               service.FromContext[adapter.DNSRouter](ctx),
 		dnsTransport:      service.FromContext[adapter.DNSTransportManager](ctx),
 		connection:        service.FromContext[adapter.ConnectionManager](ctx),
 		network:           service.FromContext[adapter.NetworkManager](ctx),
 		httpClientManager: service.FromContext[adapter.HTTPClientManager](ctx),
 		rules:             make([]adapter.Rule, 0, len(options.Rules)),
+		ruleByUUID:        make(map[string]adapter.Rule),
 		ruleSetMap:        make(map[string]adapter.RuleSet),
 		needFindProcess:   hasRule(options.Rules, isProcessRule) || hasDNSRule(dnsOptions.Rules, isProcessDNSRule) || options.FindProcess || C.IsAndroid && platformInterface != nil,
 		needFindNeighbor:  hasRule(options.Rules, isNeighborRule) || hasDNSRule(dnsOptions.Rules, isNeighborDNSRule) || hasLocalNeighborDNSServer(dnsOptions.Servers) || options.FindNeighbor,
 		leaseFiles:        options.DHCPLeaseFiles,
 		pauseManager:      service.FromContext[pause.Manager](ctx),
 		platformInterface: platformInterface,
+
+		defaultDomainMatchStrategy: C.DomainMatchStrategy(options.DefaultDomainMatchStrategy),
+		reloadChan:                 reloadChan,
 	}
 }
 
 func (r *Router) Initialize(rules []option.Rule, ruleSets []option.RuleSet) error {
+	if r.defaultDomainMatchStrategy == C.DomainMatchStrategyFQDNOnly || r.defaultDomainMatchStrategy == C.DomainMatchStrategySniffHostOnly {
+		return E.New("default_domain_match_strategy cannot be fqdn_only or sniffhost_only")
+	}
 	for i, options := range rules {
 		err := R.ValidateNoNestedRuleActions(options)
 		if err != nil {
@@ -88,7 +108,9 @@ func (r *Router) Initialize(rules []option.Rule, ruleSets []option.RuleSet) erro
 		if err != nil {
 			return E.Cause(err, "parse rule[", i, "]")
 		}
+		uuid := rule.UUID()
 		r.rules = append(r.rules, rule)
+		r.ruleByUUID[uuid] = rule
 	}
 	for i, options := range ruleSets {
 		for _, tag := range options.Tag {
@@ -110,6 +132,14 @@ func (r *Router) Initialize(rules []option.Rule, ruleSets []option.RuleSet) erro
 }
 
 func (r *Router) ValidateRuleActions() error {
+	return r.validateRuleActions(true)
+}
+
+func (r *Router) ValidateDeferredRuleActions() error {
+	return r.validateRuleActions(false)
+}
+
+func (r *Router) validateRuleActions(deferDynamicProviders bool) error {
 	for i, rule := range r.rules {
 		var outboundTag, serverTag string
 		switch action := rule.Action().(type) {
@@ -122,7 +152,9 @@ func (r *Router) ValidateRuleActions() error {
 		}
 		if outboundTag != "" {
 			if _, loaded := r.outbound.Outbound(outboundTag); !loaded {
-				return E.New("rule[", i, "]: outbound not found: ", outboundTag)
+				if !deferDynamicProviders || !r.isDeferredProviderOutbound(outboundTag) {
+					return E.New("rule[", i, "]: outbound not found: ", outboundTag)
+				}
 			}
 		}
 		if serverTag != "" {
@@ -134,10 +166,31 @@ func (r *Router) ValidateRuleActions() error {
 	return nil
 }
 
+func (r *Router) isDeferredProviderOutbound(tag string) bool {
+	if r.provider == nil {
+		return false
+	}
+	for _, provider := range r.provider.Providers() {
+		switch provider.Type() {
+		case C.ProviderTypeLocal, C.ProviderTypeRemote:
+			prefix := provider.Tag() + "/"
+			if strings.HasPrefix(tag, prefix) && len(tag) > len(prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	monitor := taskmonitor.New(r.logger, C.StartTimeout)
 	switch stage {
 	case adapter.StartStateInitialize:
+		r.quicSniffCache = expiringmap.New[quicSniffCacheKey, quicSniffResult](quicSniffCacheTTL)
+		scope.Add(func() error {
+			r.quicSniffCache.Close()
+			return nil
+		})
 		for _, ruleSet := range r.ruleSets {
 			scope.Add(ruleSet.Close)
 		}
@@ -210,12 +263,15 @@ func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		if r.ruleSetUpdater != nil {
 			scope.Add(r.ruleSetUpdater.Close)
 		}
-		r.network.Initialize(r.ruleSets)
 		for _, ruleSet := range r.ruleSets {
 			ruleSet.RegisterCallback(func(adapter.RuleSet) {
 				r.updateRuleSetNeedFindProcess()
+				if updater, ok := r.network.(interface{ UpdateRuleSets([]adapter.RuleSet) }); ok {
+					updater.UpdateRuleSets(r.ruleSets)
+				}
 			})
 		}
+		r.network.Initialize(r.ruleSets)
 		r.updateRuleSetNeedFindProcess()
 		if r.NeedFindProcess() || r.hasUpdatableRuleSet {
 			if r.platformInterface != nil && r.platformInterface.UsePlatformConnectionOwnerFinder() {
@@ -233,6 +289,9 @@ func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 					}
 				} else {
 					r.processSearcher = searcher
+					if C.IsAndroid {
+						r.processLookupMode = process.LookupOwner
+					}
 				}
 			}
 		}
@@ -264,6 +323,8 @@ func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	}
 	return nil
 }
+
+func (r *Router) RuleSets() []adapter.RuleSet { return r.ruleSets }
 
 func (r *Router) RuleSet(tag string) (adapter.RuleSet, bool) {
 	ruleSet, loaded := r.ruleSetMap[tag]
@@ -299,6 +360,7 @@ func (r *Router) NeighborResolver() adapter.NeighborResolver {
 }
 
 func (r *Router) ResetNetwork() {
+	r.processCacheGeneration.Add(1)
 	r.httpClientManager.ResetNetwork()
 	r.dns.ResetNetwork()
 	if r.processCache != nil {
@@ -306,5 +368,60 @@ func (r *Router) ResetNetwork() {
 	}
 	if r.processSearcher != nil {
 		r.processSearcher.ResetCache()
+	}
+}
+
+const quicSniffCacheTTL = 5 * time.Minute
+
+func (r *Router) processQUICSniff(ctx context.Context, metadata *adapter.InboundContext) {
+	if metadata.Protocol != C.ProtocolQUIC {
+		return
+	}
+	metadata.SniffDestination = metadata.Destination
+	if metadata.SniffHost != "" {
+		r.cacheQUICSniff(metadata.Source, metadata.SniffDestination, quicSniffResult{
+			host: metadata.SniffHost, hasECHExtension: metadata.SniffHasECHExtension,
+		})
+	} else if result, loaded := r.lookupQUICSniff(metadata.Source, metadata.SniffDestination); loaded {
+		metadata.SniffHost = result.host
+		metadata.SniffHasECHExtension = result.hasECHExtension
+		r.logger.DebugContext(ctx, "restored QUIC SNI from cache: ", result.host)
+	}
+}
+
+type quicSniffCacheKey struct {
+	source      M.Socksaddr
+	destination M.Socksaddr
+}
+
+type quicSniffResult struct {
+	host            string
+	hasECHExtension bool
+}
+
+func (r *Router) cacheQUICSniff(source, destination M.Socksaddr, result quicSniffResult) {
+	r.quicSniffCache.Store(quicSniffCacheKey{source, destination}, result)
+}
+
+func (r *Router) lookupQUICSniff(source, destination M.Socksaddr) (quicSniffResult, bool) {
+	return r.quicSniffCache.LoadAndRefresh(quicSniffCacheKey{source, destination})
+}
+
+func (r *Router) refreshQUICSniff(source, destination M.Socksaddr, result quicSniffResult) {
+	r.quicSniffCache.StoreIf(quicSniffCacheKey{source, destination}, result, func(current quicSniffResult, loaded bool) bool {
+		return !loaded || current == result
+	})
+}
+
+func (r *Router) DefaultDomainMatchStrategy() C.DomainMatchStrategy {
+	return r.defaultDomainMatchStrategy
+}
+
+func (r *Router) Reload() {
+	if r.platformInterface == nil {
+		select {
+		case r.reloadChan <- struct{}{}:
+		default:
+		}
 	}
 }

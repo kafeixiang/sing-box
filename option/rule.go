@@ -75,19 +75,19 @@ func (r Rule) DescribeSchema(builder schema.Builder) (*schema.Node, error) {
 			return nil, err
 		}
 		nestedRef, err := builder.Define("NestedRule", func() (*schema.Node, error) {
-			return nestedRuleUnion(builder, reflect.TypeFor[RawDefaultRule](), "NestedRule")
+			return nestedRuleUnion(builder, reflect.TypeFor[RawDefaultRule](), "NestedRule", true)
 		})
 		if err != nil {
 			return nil, err
 		}
-		return ruleUnion(builder, reflect.TypeFor[RawDefaultRule](), nestedRef, actionRef)
+		return ruleUnion(builder, reflect.TypeFor[RawDefaultRule](), nestedRef, actionRef, true)
 	})
 }
 
 // ruleUnion builds the top-level rule schema: match fields composed with rule
 // actions via unevaluatedProperties, mirroring the badjson.UnmarshallExcluded
 // composition in DefaultRule / LogicalRule.
-func ruleUnion(builder schema.Builder, matchType reflect.Type, nestedRef *schema.Node, actionRef *schema.Node) (*schema.Node, error) {
+func ruleUnion(builder schema.Builder, matchType reflect.Type, nestedRef *schema.Node, actionRef *schema.Node, withDomainMatchStrategy bool) (*schema.Node, error) {
 	defaultMatch := schema.LooseObject()
 	defaultMatch.Properties.Put("type", schema.StringEnum(C.RuleTypeDefault, ""))
 	err := builder.FlattenStruct(defaultMatch, matchType)
@@ -102,7 +102,7 @@ func ruleUnion(builder schema.Builder, matchType reflect.Type, nestedRef *schema
 
 	logicalMatch := schema.LooseObject()
 	logicalMatch.Properties.Put("type", schema.StringConst(C.RuleTypeLogical))
-	logicalProperties(logicalMatch, nestedRef)
+	logicalProperties(logicalMatch, nestedRef, withDomainMatchStrategy)
 	logicalMatch.Required = []string{"type", "mode", "rules"}
 	logicalVariant := &schema.Node{
 		Type:                  "object",
@@ -115,7 +115,7 @@ func ruleUnion(builder schema.Builder, matchType reflect.Type, nestedRef *schema
 
 // nestedRuleUnion builds a match-only rule schema: nested rules reject rule
 // actions, and headless rules never carry them.
-func nestedRuleUnion(builder schema.Builder, matchType reflect.Type, selfName string) (*schema.Node, error) {
+func nestedRuleUnion(builder schema.Builder, matchType reflect.Type, selfName string, withDomainMatchStrategy bool) (*schema.Node, error) {
 	defaultVariant := schema.StrictObject()
 	defaultVariant.Properties.Put("type", schema.StringEnum(C.RuleTypeDefault, ""))
 	err := builder.FlattenStruct(defaultVariant, matchType)
@@ -125,15 +125,18 @@ func nestedRuleUnion(builder schema.Builder, matchType reflect.Type, selfName st
 
 	logicalVariant := schema.StrictObject()
 	logicalVariant.Properties.Put("type", schema.StringConst(C.RuleTypeLogical))
-	logicalProperties(logicalVariant, schema.RefNode(selfName))
+	logicalProperties(logicalVariant, schema.RefNode(selfName), withDomainMatchStrategy)
 	logicalVariant.Required = []string{"type", "mode", "rules"}
 
 	return schema.OneOf(defaultVariant, logicalVariant), nil
 }
 
-func logicalProperties(node *schema.Node, nestedRef *schema.Node) {
+func logicalProperties(node *schema.Node, nestedRef *schema.Node, withDomainMatchStrategy bool) {
 	node.Properties.Put("mode", schema.StringEnum(C.LogicalTypeAnd, C.LogicalTypeOr))
 	node.Properties.Put("rules", &schema.Node{Type: "array", Items: nestedRef})
+	if withDomainMatchStrategy {
+		node.Properties.Put("domain_match_strategy", schema.RefNode("DomainMatchStrategy"))
+	}
 	node.Properties.Put("invert", schema.BooleanNode())
 }
 
@@ -148,6 +151,7 @@ type RawDefaultRule struct {
 	DomainSuffix             badoption.Listable[string]                                                  `json:"domain_suffix,omitempty"`
 	DomainKeyword            badoption.Listable[string]                                                  `json:"domain_keyword,omitempty"`
 	DomainRegex              badoption.Listable[string]                                                  `json:"domain_regex,omitempty"`
+	DomainIsECH              bool                                                                        `json:"domain_is_ech,omitzero"`
 	Geosite                  badoption.Listable[string]                                                  `json:"geosite,omitempty" schema:"omit"`
 	SourceGeoIP              badoption.Listable[string]                                                  `json:"source_geoip,omitempty" schema:"omit"`
 	GeoIP                    badoption.Listable[string]                                                  `json:"geoip,omitempty" schema:"omit"`
@@ -166,7 +170,7 @@ type RawDefaultRule struct {
 	PackageNameRegex         badoption.Listable[string]                                                  `json:"package_name_regex,omitempty"`
 	User                     badoption.Listable[string]                                                  `json:"user,omitempty"`
 	UserID                   badoption.Listable[int32]                                                   `json:"user_id,omitempty"`
-	ClashMode                string                                                                      `json:"clash_mode,omitempty"`
+	ClashMode                badoption.Listable[string]                                                  `json:"clash_mode,omitempty"`
 	NetworkType              badoption.Listable[InterfaceType]                                           `json:"network_type,omitempty"`
 	NetworkIsExpensive       bool                                                                        `json:"network_is_expensive,omitempty"`
 	NetworkIsConstrained     bool                                                                        `json:"network_is_constrained,omitempty"`
@@ -182,7 +186,11 @@ type RawDefaultRule struct {
 	DNSSearchDomain          *badjson.TypedMap[string, badoption.Listable[string]]                       `json:"dns_search_domain,omitempty"`
 	RuleSet                  badoption.Listable[string]                                                  `json:"rule_set,omitempty" reference:"rule_set"`
 	RuleSetIPCIDRMatchSource bool                                                                        `json:"rule_set_ip_cidr_match_source,omitempty"`
+	DomainMatchStrategy      DomainMatchStrategy                                                         `json:"domain_match_strategy,omitempty"`
 	Invert                   bool                                                                        `json:"invert,omitempty"`
+
+	TimeRange badoption.Listable[TimeRange] `json:"time_range,omitempty"`
+	TimeZone  string                        `json:"time_zone,omitempty"`
 
 	// Deprecated: renamed to rule_set_ip_cidr_match_source
 	Deprecated_RulesetIPCIDRMatchSource bool `json:"rule_set_ipcidr_match_source,omitempty" schema:"omit"`
@@ -197,24 +205,37 @@ func (r DefaultRule) MarshalJSON() ([]byte, error) {
 	return badjson.MarshallObjects(r.RawDefaultRule, r.RuleAction)
 }
 
+func NormalizeClashModes(modes []string) badoption.Listable[string] {
+	var normalized badoption.Listable[string]
+	for _, mode := range modes {
+		if mode != "" {
+			normalized = append(normalized, mode)
+		}
+	}
+	return normalized
+}
+
 func (r *DefaultRule) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &r.RawDefaultRule)
 	if err != nil {
 		return err
 	}
+	r.RawDefaultRule.ClashMode = NormalizeClashModes(r.RawDefaultRule.ClashMode)
 	return badjson.UnmarshallExcluded(data, &r.RawDefaultRule, &r.RuleAction)
 }
 
 func (r DefaultRule) IsValid() bool {
+	r.ClashMode = NormalizeClashModes(r.ClashMode)
 	var defaultValue DefaultRule
 	defaultValue.Invert = r.Invert
 	return !reflect.DeepEqual(r, defaultValue)
 }
 
 type RawLogicalRule struct {
-	Mode   string `json:"mode" enum:"and,or"`
-	Rules  []Rule `json:"rules,omitempty"`
-	Invert bool   `json:"invert,omitempty"`
+	Mode                string              `json:"mode" enum:"and,or"`
+	Rules               []Rule              `json:"rules,omitempty"`
+	DomainMatchStrategy DomainMatchStrategy `json:"domain_match_strategy,omitempty"`
+	Invert              bool                `json:"invert,omitempty"`
 }
 
 type LogicalRule struct {
@@ -258,6 +279,7 @@ func unmarshalDefaultRuleContext(ctx context.Context, data []byte, rule *Default
 	if err != nil {
 		return err
 	}
+	rule.RawDefaultRule.ClashMode = NormalizeClashModes(rule.RawDefaultRule.ClashMode)
 	err = badjson.UnmarshallExcludedContext(ctx, data, &rule.RawDefaultRule, &rule.RuleAction)
 	if err != nil {
 		return err

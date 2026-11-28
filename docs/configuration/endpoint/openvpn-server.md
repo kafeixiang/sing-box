@@ -11,7 +11,10 @@
 
   ... // Listen Fields
 
+  // "tcp_congestion_control": "bbr",
   "system": false,
+  "gso": false,
+  "inner_domain_resolver": "", // or {}
   "name": "",
   "mtu": 1500,
   "mode": "tls",
@@ -105,6 +108,18 @@ See [Listen Fields](/configuration/shared/listen/) for details. `udp_timeout` is
 
 ## Fields
 
+### tcp_congestion_control
+
+Selects the congestion controller for the local sender in this endpoint's internal Go TCP stack.
+
+Available values: `reno`, `cubic`, `bbr`. Omitting the field preserves the default, CUBIC. Empty values and `none` are not supported.
+
+Only affects TCP connections terminated or initiated by this endpoint's internal Go TCP stack. It does not affect kernel TCP, TCP forwarded at L3, UDP, or inner QUIC. Peers may select different algorithms; for example, configure this field on the server to control TCP download data sent by its internal stack to the client.
+
+Allowed with either `system: false` or `system: true`, but only applies to connections handled by the internal Go TCP stack. Enabling the system interface does not make this setting affect kernel TCP.
+
+Changing algorithms does not guarantee higher throughput; test on the actual network path.
+
 ### system
 
 Use system interface.
@@ -112,6 +127,28 @@ Use system interface.
 Requires privilege and cannot conflict with existing system interfaces.
 
 If disabled, sing-box uses the internal network stack.
+
+### gso
+
+!!! quote ""
+
+    Only supported on Linux.
+
+Attempt to enable generic segmentation offload for the system interface.
+
+Enabled by default when `system` is `true`. Set to `false` to disable.
+
+This option has no effect when `system` is `false`.
+
+### inner_domain_resolver
+
+Set the DNS resolver used for destination domain names when this endpoint is selected as an outbound. Applies to TCP and UDP.
+
+It is also used to resolve unresolved domain destinations when this endpoint is selected for L3 forwarding.
+
+This option uses the same format as [domain_resolver](/configuration/shared/dial/#domain_resolver).
+
+When unset, existing DNS routing rules and the default DNS apply. IP destinations do not require domain resolution.
 
 ### name
 

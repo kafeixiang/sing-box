@@ -30,7 +30,7 @@ const (
 	realm               = "sing-box"
 )
 
-var ConfigureHTTP3ListenerFunc func(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.QUICOptions) (io.Closer, error)
+var ConfigureHTTP3ListenerFunc func(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler http.Handler, tlsConfig tls.ServerConfig, options option.QUICOptions, congestionControl option.H3CongestionControl) (io.Closer, error)
 
 type Handler interface {
 	N.TCPConnectionHandlerEx
@@ -44,6 +44,7 @@ type ServerOptions struct {
 	HTTP2         bool
 	HTTP2Options  option.HTTP2Options
 	UDP           bool
+	UDPTemplate   *UDPTemplate
 	Tunnels       map[string]TunnelHandler
 }
 
@@ -53,6 +54,7 @@ type Server struct {
 	http1         bool
 	http2Server   *http2.Server
 	udp           bool
+	udpTemplate   *UDPTemplate
 	tunnels       map[string]TunnelHandler
 }
 
@@ -62,7 +64,11 @@ func NewServer(options ServerOptions) *Server {
 		logger:        options.Logger,
 		http1:         options.HTTP1,
 		udp:           options.UDP,
+		udpTemplate:   options.UDPTemplate,
 		tunnels:       options.Tunnels,
+	}
+	if server.udpTemplate == nil {
+		server.udpTemplate = defaultUDPTemplate
 	}
 	if options.HTTP2 {
 		server.http2Server = &http2.Server{
@@ -125,7 +131,7 @@ func (s *Server) ConfigureTLS(tlsConfig tls.ServerConfig) {
 	tlsConfig.SetNextProtos(nextProtos)
 }
 
-func (s *Server) ListenHTTP3(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler Handler, tlsConfig tls.ServerConfig, options option.QUICOptions) (io.Closer, error) {
+func (s *Server) ListenHTTP3(ctx context.Context, logger logger.Logger, listener *listener.Listener, handler Handler, tlsConfig tls.ServerConfig, options option.QUICOptions, congestionControl option.H3CongestionControl) (io.Closer, error) {
 	if ConfigureHTTP3ListenerFunc == nil {
 		return nil, C.ErrQUICNotIncluded
 	}
@@ -135,7 +141,7 @@ func (s *Server) ListenHTTP3(ctx context.Context, logger logger.Logger, listener
 	return ConfigureHTTP3ListenerFunc(ctx, logger, listener, &httpHandler{
 		server:  s,
 		handler: handler,
-	}, tlsConfig, options)
+	}, tlsConfig, options, congestionControl)
 }
 
 func (s *Server) finishConnection(ctx context.Context, conn net.Conn, source M.Socksaddr, onClose N.CloseHandlerFunc, err error) {

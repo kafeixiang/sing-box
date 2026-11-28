@@ -132,6 +132,9 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if options.NetNs != "" && !C.IsLinux {
 		return nil, E.New("`netns` is only supported on Linux")
 	}
+	if C.IsAndroid && options.AutoRedirectDisableMarkMode {
+		return nil, E.New("`auto_redirect_disable_mark_mode` is not supported on Android")
+	}
 	tunMTU := options.MTU
 	if tunMTU == 0 {
 		if platformInterface != nil && platformInterface.UnderNetworkExtension() {
@@ -297,7 +300,11 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		inbound.enableAutoRedirect = true
 		inbound.usePlatformAutoRedirect = platformInterface != nil && platformInterface.UsePlatformAutoRedirect()
 		inbound.disableNFTables = parseErr == nil && disableNFTables
-		inbound.tunOptions.AutoRedirectMarkMode = true
+		disableMarkMode := C.IsLinux && !C.IsAndroid && options.AutoRedirectDisableMarkMode
+		if disableMarkMode && (len(inbound.routeRuleSet) > 0 || len(inbound.routeExcludeRuleSet) > 0) {
+			return nil, E.New("`auto_redirect` mark mode cannot be disabled with `route_address_set` or `route_exclude_address_set`")
+		}
+		inbound.tunOptions.AutoRedirectMarkMode = !disableMarkMode
 		inbound.dnsHijackByPort = inbound.tunOptions.DNSModeOrDefault() == tun.DNSModeHijack && len(options.DNSAddress) == 0
 		if inbound.tunOptions.DNSModeOrDefault() == tun.DNSModeHijack && len(options.DNSAddress) > 0 {
 			inet6DNSAddress, _ := inbound.tunOptions.Inet6DNSAddress()
@@ -305,7 +312,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 				inbound.redirectDNSAddress = inet6DNSAddress[0]
 			}
 		}
-		if !inbound.usePlatformAutoRedirect && options.NetNs == "" {
+		if !inbound.usePlatformAutoRedirect && !disableMarkMode && options.NetNs == "" {
 			err = networkManager.RegisterAutoRedirectOutputMark(inbound.tunOptions.AutoRedirectOutputMarkOrDefault())
 			if err != nil {
 				return nil, err
@@ -486,7 +493,9 @@ func (t *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		}
 		monitor.Start("open interface")
 		if t.usePlatformInterface {
-			tunInterface, err = t.platformInterface.OpenInterface(&tunOptions, t.platformOptions)
+			// Routing bypass actions also need VPN route compatibility without address sets.
+			androidVPNRouteBypass := C.IsAndroid && t.usePlatformAutoRedirect
+			tunInterface, err = t.platformInterface.OpenInterface(&tunOptions, t.platformOptions, androidVPNRouteBypass)
 		} else {
 			tunInterface, err = tun.New(tunOptions)
 		}
@@ -727,10 +736,12 @@ func (t *autoRedirectHandler) NewConnectionEx(ctx context.Context, conn net.Conn
 	ctx = log.ContextWithNewID(ctx)
 	var metadata adapter.InboundContext
 	metadata.Inbound = t.tag
-	metadata.InboundType = C.TypeTun
+	metadata.InboundType = C.TypeRedirect
 	metadata.Source = source
 	metadata.Destination = t.redirectDNSDestination(source, destination)
 	if (*Inbound)(t).isDNSHijackDestination(metadata.Destination) {
+		// The router only hijacks DNS streams from TUN inbounds by default.
+		metadata.InboundType = C.TypeTun
 		metadata.Protocol = C.ProtocolDNS
 	}
 	if metadata.Protocol == C.ProtocolDNS {

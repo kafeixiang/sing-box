@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net"
 	"time"
 
@@ -28,11 +29,16 @@ var _ ServerConfigCompat = (*RealityServerConfig)(nil)
 type RealityServerConfig struct {
 	config           *utls.RealityConfig
 	handshakeTimeout time.Duration
+	rejectUnknownSNI bool
+	serverNames      map[string]bool
 }
 
 func NewRealityServer(ctx context.Context, logger log.ContextLogger, options option.InboundTLSOptions) (ServerConfig, error) {
 	var tlsConfig utls.RealityConfig
 
+	if options.ServerName != "" && len(options.ServerNames) > 0 {
+		return nil, E.New("server_name and server_names cannot be configured at the same time")
+	}
 	if options.CertificateProvider != nil {
 		return nil, E.New("certificate_provider is unavailable in reality")
 	}
@@ -92,7 +98,22 @@ func NewRealityServer(ctx context.Context, logger log.ContextLogger, options opt
 	tlsConfig.Type = N.NetworkTCP
 	tlsConfig.Dest = options.Reality.Handshake.ServerOptions.Build().String()
 
-	tlsConfig.ServerNames = map[string]bool{options.ServerName: true}
+	serverNames := make(map[string]bool)
+	if options.ServerName != "" {
+		serverNames[options.ServerName] = true
+	}
+	for _, name := range options.ServerNames {
+		if name != "" {
+			serverNames[name] = true
+		}
+	}
+	if len(serverNames) > 0 {
+		tlsConfig.ServerNames = maps.Clone(serverNames)
+	} else {
+		// Preserve upstream empty-key entry so unnamed/no-SNI Reality clients
+		// continue to authenticate when no explicit server names are configured.
+		tlsConfig.ServerNames = map[string]bool{"": true}
+	}
 	privateKey, err := base64.RawURLEncoding.DecodeString(options.Reality.PrivateKey)
 	if err != nil {
 		return nil, E.Cause(err, "decode private key")
@@ -140,6 +161,8 @@ func NewRealityServer(ctx context.Context, logger log.ContextLogger, options opt
 	var config ServerConfig = &RealityServerConfig{
 		config:           &tlsConfig,
 		handshakeTimeout: handshakeTimeout,
+		rejectUnknownSNI: options.RejectUnknownSNI,
+		serverNames:      serverNames,
 	}
 	if options.KernelTx || options.KernelRx {
 		if !C.IsLinux {
@@ -204,6 +227,18 @@ func (c *RealityServerConfig) ServerHandshake(ctx context.Context, conn net.Conn
 	if err != nil {
 		return nil, err
 	}
+	if c.rejectUnknownSNI {
+		sni := tlsConn.ConnectionState().ServerName
+		if len(c.serverNames) > 0 {
+			if sni == "" || !c.serverNames[sni] {
+				_ = tlsConn.Close()
+				return nil, E.New("unknown or missing server name")
+			}
+		} else if sni != "" {
+			_ = tlsConn.Close()
+			return nil, E.New("unknown server name: no server names configured")
+		}
+	}
 	return &realityConnWrapper{Conn: tlsConn}, nil
 }
 
@@ -211,6 +246,8 @@ func (c *RealityServerConfig) Clone() Config {
 	return &RealityServerConfig{
 		config:           c.config.Clone(),
 		handshakeTimeout: c.handshakeTimeout,
+		rejectUnknownSNI: c.rejectUnknownSNI,
+		serverNames:      maps.Clone(c.serverNames),
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/iponly"
+	"github.com/sagernet/sing-box/common/udpgso"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
@@ -60,6 +61,7 @@ import (
 
 var (
 	_ adapter.OutboundWithPreferredRoutes = (*Endpoint)(nil)
+	_ adapter.FlowOutboundDomainResolver  = (*Endpoint)(nil)
 	_ adapter.InterfaceUpdateListener     = (*Endpoint)(nil)
 	_ adapter.Referrer                    = (*Endpoint)(nil)
 	_ adapter.OutboundWithMultiplex       = (*Endpoint)(nil)
@@ -123,13 +125,19 @@ type Endpoint struct {
 
 	systemInterface     bool
 	systemInterfaceName string
+	systemInterfaceGSO  bool
 	systemInterfaceMTU  uint32
 	keyAuth             bool
 	started             atomic.Bool
 	systemDialer        *dialer.DefaultDialer
+
+	innerDNSQueryOptions adapter.DNSQueryOptions
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TailscaleEndpointOptions) (adapter.Endpoint, error) {
+	if err := options.TCPCongestionControl.Validate(); err != nil {
+		return nil, err
+	}
 	stateDirectory := options.StateDirectory
 	if stateDirectory == "" {
 		stateDirectory = "tailscale"
@@ -162,6 +170,10 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	if options.AdvertiseExitNode && options.ExitNode != "" {
 		return nil, E.New("cannot advertise an exit node and use an exit node at the same time.")
+	}
+	gso := options.SystemInterface
+	if options.SystemInterfaceGSO != nil {
+		gso = *options.SystemInterfaceGSO
 	}
 	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context:          ctx,
@@ -200,12 +212,14 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 			UserLogf: func(format string, args ...any) {
 				logger.Debug(fmt.Sprintf(format, args...))
 			},
-			Ephemeral:     options.Ephemeral,
-			AuthKey:       options.AuthKey,
-			ControlURL:    options.ControlURL,
-			Port:          options.ListenPort,
-			AdvertiseTags: options.AdvertiseTags,
-			Dialer:        &endpointDialer{Dialer: outboundDialer, logger: logger},
+			Ephemeral:                    options.Ephemeral,
+			AuthKey:                      options.AuthKey,
+			ControlURL:                   options.ControlURL,
+			Port:                         options.ListenPort,
+			AdvertiseTags:                options.AdvertiseTags,
+			Dialer:                       &endpointDialer{Dialer: outboundDialer, logger: logger},
+			DisableUDPGSO:                udpgso.Disabled(options.UDPGSO),
+			NetstackTCPCongestionControl: string(options.TCPCongestionControl),
 			LookupHook: func(ctx context.Context, host string) ([]netip.Addr, error) {
 				return dnsRouter.Lookup(ctx, host, dialerQueryOptions)
 			},
@@ -234,10 +248,18 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		sshServerOptions:           options.SSHServer,
 		taildrop:                   newTaildropManager(ctx, logger, tag, taildropDirectory, platformInterface),
 		systemInterface:            options.SystemInterface,
+		systemInterfaceGSO:         gso,
 		systemInterfaceName:        options.SystemInterfaceName,
 		systemInterfaceMTU:         options.SystemInterfaceMTU,
 		keyAuth:                    options.AuthKey != "",
 		onDemand:                   options.OnDemand,
+	}
+	if options.InnerDomainResolver != nil {
+		innerDNSOpts, err := dialer.NewInnerDNSQueryOptions(ctx, options.InnerDomainResolver)
+		if err != nil {
+			return nil, E.Cause(err, "inner domain resolver")
+		}
+		tailscaleEndpoint.innerDNSQueryOptions = innerDNSOpts
 	}
 	tailscaleEndpoint.server.NetstackHandler = tailscaleEndpoint
 	return tailscaleEndpoint, nil
@@ -295,7 +317,7 @@ func (t *Endpoint) start(scope *adapter.Scope) error {
 		tunOptions := tun.Options{
 			Name:                      tunName,
 			MTU:                       mtu,
-			GSO:                       true,
+			GSO:                       t.systemInterfaceGSO,
 			InterfaceScope:            true,
 			InterfaceMonitor:          t.network.InterfaceMonitor(),
 			InterfaceFinder:           t.network.InterfaceFinder(),
@@ -768,7 +790,7 @@ func (t *Endpoint) DialContext(ctx context.Context, network string, destination 
 		return nil, resumeErr
 	}
 	if destination.IsDomain() {
-		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, t.innerDNSQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -832,7 +854,7 @@ func (t *Endpoint) listenPacketWithAddress(ctx context.Context, destination M.So
 func (t *Endpoint) ListenPacketWithDestination(ctx context.Context, destination M.Socksaddr) (net.PacketConn, netip.Addr, error) {
 	t.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	if destination.IsDomain() {
-		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := t.dnsRouter.Lookup(ctx, destination.Fqdn, t.innerDNSQueryOptions)
 		if err != nil {
 			return nil, netip.Addr{}, err
 		}

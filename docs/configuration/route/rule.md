@@ -87,6 +87,7 @@ icon: material/new-box
         "domain_regex": [
           "^stun\\..+"
         ],
+        "domain_is_ech": true,
         "geosite": [
           "cn"
         ],
@@ -144,7 +145,9 @@ icon: material/new-box
         "user_id": [
           1000
         ],
-        "clash_mode": "direct",
+        "clash_mode": [
+          "direct"
+        ],
         "network_type": [
           "wifi"
         ],
@@ -283,6 +286,14 @@ Match domain using keyword.
 
 Match domain using regular expression.
 
+#### domain_is_ech
+
+When set to true, matches after a TLS or QUIC ClientHello has been sniffed if it contains the ECH extension and its outer SNI matches the ECH public name learned for the original destination.
+
+Place rules that use this condition after a sniff action. The public name is learned from DNS HTTPS records when DNS reverse mapping or FakeIP is enabled. The outer SNI remains available as the sniffed hostname.
+
+This condition always uses the sniffed SNI. `domain_match_strategy` selects the hostname for the other domain conditions.
+
 #### geosite
 
 !!! failure "Deprecated in sing-box 1.8.0"
@@ -405,7 +416,7 @@ Match Clash mode.
 
 !!! quote ""
 
-    Only supported in graphical clients on Android and Apple platforms.
+    Only supported in graphical clients on Android and Apple platforms and in the Android core.
 
 Match network type.
 
@@ -480,11 +491,12 @@ See [Wi-Fi State](/configuration/shared/wifi-state/) for details.
 
 Match specified outbounds' preferred routes.
 
-| Type        | Match                                              |
-|-------------|----------------------------------------------------|
-| `tailscale` | Match MagicDNS domains and peers' allowed IPs      |
-| `wireguard` | Match peers's allowed IPs                          |
-| `bridge`    | Match all addresses except local addresses of the machine, only in [pre-match](/configuration/shared/pre-match/) |
+| Type          | Match                                              |
+|---------------|----------------------------------------------------|
+| `tailscale`   | Match MagicDNS domains and peers' allowed IPs      |
+| `wireguard`   | Match peers's allowed IPs                          |
+| `easyconnect` | Match resource-list prefixes and domains published by the VPN server |
+| `bridge`      | Match all addresses except local addresses of the machine, only in [pre-match](/configuration/shared/pre-match/) |
 
 #### dns_server_address
 
@@ -500,6 +512,7 @@ Match specified DNS servers' server addresses.
 | `tailscale`   | Match DNS resolvers of the tailnet            |
 | `openvpn`     | Match DNS servers pushed by the VPN server    |
 | `openconnect` | Match DNS servers pushed by the VPN server    |
+| `easyconnect` | Match DNS servers pushed by the VPN server    |
 
 #### dns_search_domain
 
@@ -515,6 +528,7 @@ Match specified DNS servers' search domains.
 | `tailscale`   | Match search domains of the tailnet              |
 | `openvpn`     | Match search domains pushed by the VPN server    |
 | `openconnect` | Match search domains pushed by the VPN server    |
+| `easyconnect` | Match search domains pushed by the VPN server    |
 
 #### source_mac_address
 
